@@ -29,6 +29,8 @@ public:
     SupportTreePtr   support_tree_ptr;   // the supports
     SlicedSupports   support_slices;     // sliced supports
     std::vector<LevelID>    level_ids;
+
+    inline SupportData(const TriangleMesh& trmesh): emesh(trmesh) {}
 };
 
 namespace {
@@ -385,8 +387,6 @@ SLAPrint::ApplyStatus SLAPrint::apply(const Model &model, const DynamicPrintConf
             update_apply_status(false);
     }
 
-    this->update_object_placeholders();
-
 #ifdef _DEBUG
     check_model_ids_equal(m_model, model);
 #endif /* _DEBUG */
@@ -407,6 +407,14 @@ sla::SupportConfig make_support_cfg(const SLAPrintObjectConfig& c) {
     scfg.tilt = c.support_critical_angle.getFloat() * PI / 180.0 ;
     scfg.max_bridge_length_mm = c.support_max_bridge_length.getFloat();
     scfg.headless_pillar_radius_mm = 0.375*c.support_pillar_diameter.getFloat();
+    switch(c.support_pillar_connection_mode.getInt()) {
+    case slapcmZigZag:
+        scfg.pillar_connection_mode = sla::PillarConnectionMode::zigzag; break;
+    case slapcmCross:
+        scfg.pillar_connection_mode = sla::PillarConnectionMode::cross; break;
+    case slapcmDynamic:
+        scfg.pillar_connection_mode = sla::PillarConnectionMode::dynamic; break;
+    }
     scfg.pillar_widening_factor = c.support_pillar_widening_factor.getFloat();
     scfg.base_radius_mm = 0.5*c.support_base_diameter.getFloat();
     scfg.base_height_mm = c.support_base_height.getFloat();
@@ -431,10 +439,6 @@ std::vector<float> SLAPrint::calculate_heights(const BoundingBoxf3& bb3d,
     float maxZ = float(bb3d.max(Z));
     auto flh = float(layer_height);
     auto gnd = float(bb3d.min(Z));
-
-    // The first layer (the one before the initial height) is added only
-    // if there is no pad and no elevation value
-    if(minZ >= gnd) heights.emplace_back(minZ);
 
     for(float h = minZ + initial_layer_height; h < maxZ; h += flh)
         if(h >= gnd) heights.emplace_back(h);
@@ -499,8 +503,14 @@ void SLAPrint::process()
     // support points. Then we sprinkle the rest of the mesh.
     auto support_points = [this, ilh](SLAPrintObject& po) {
         const ModelObject& mo = *po.m_model_object;
-        po.m_supportdata.reset(new SLAPrintObject::SupportData());
-        po.m_supportdata->emesh = sla::to_eigenmesh(po.transformed_mesh());
+        po.m_supportdata.reset(
+                    new SLAPrintObject::SupportData(po.transformed_mesh()) );
+
+        // If supports are disabled, we can skip the model scan.
+        if(!po.m_config.supports_enable.getBool()) return;
+
+        BOOST_LOG_TRIVIAL(debug) << "Support point count "
+                                 << mo.sla_support_points.size();
 
         // If there are no points on the front-end, we will do the
         // autoplacement. Otherwise we will just blindly copy the frontend data
@@ -534,6 +544,9 @@ void SLAPrint::process()
             const std::vector<Vec3d>& points = auto_supports.output();
             this->throw_if_canceled();
             po.m_supportdata->support_points = sla::to_point_set(points);
+
+            BOOST_LOG_TRIVIAL(debug) << "Automatic support points: "
+                                     << po.m_supportdata->support_points.rows();
         }
         else {
             // There are some points on the front-end, no calculation will be done.
@@ -581,8 +594,18 @@ void SLAPrint::process()
 
             // Create the unified mesh
             auto rc = SlicingStatus::RELOAD_SCENE;
+
+            // This is to prevent "Done." being displayed during merged_mesh()
             report_status(*this, -1, L("Visualizing supports"));
             po.m_supportdata->support_tree_ptr->merged_mesh();
+
+            BOOST_LOG_TRIVIAL(debug) << "Processed support point count "
+                                     << po.m_supportdata->support_points.rows();
+
+            // Check the mesh for later troubleshooting.
+            if(po.support_mesh().empty())
+                BOOST_LOG_TRIVIAL(warning) << "Support mesh is empty";
+
             report_status(*this, -1, L("Visualizing supports"), rc);
         } catch(sla::SLASupportsStoppedException&) {
             // no need to rethrow
@@ -614,7 +637,7 @@ void SLAPrint::process()
             sla::PoolConfig pcfg(wt, h, md, er);
 
             ExPolygons bp;
-            double pad_h = sla::get_pad_elevation(pcfg);
+            double pad_h = sla::get_pad_fullheight(pcfg);
             auto&& trmesh = po.transformed_mesh();
 
             // This call can get pretty time consuming
@@ -669,7 +692,6 @@ void SLAPrint::process()
         // model_slice method. Only difference is that here it works with
         // scaled coordinates
         po.m_level_ids.clear();
-        if(sminZ >= smodelgnd) po.m_level_ids.emplace_back(sminZ);
         for(LevelID h = sminZ + sih; h < smaxZ; h += slh)
             if(h >= smodelgnd) po.m_level_ids.emplace_back(h);
 
@@ -708,9 +730,7 @@ void SLAPrint::process()
             po.m_supportdata->level_ids.reserve(sslices.size());
 
             for(int i = 0; i < int(sslices.size()); ++i) {
-                int a = i == 0 ? 0 : 1;
-                int b = i == 0 ? 0 : i - 1;
-                LevelID h = sminZ + a * sih + b * slh;
+                LevelID h = sminZ + sih + i * slh;
                 po.m_supportdata->level_ids.emplace_back(h);
 
                 float fh = float(double(h) * SCALING_FACTOR);
@@ -1042,6 +1062,7 @@ bool SLAPrintObject::invalidate_state_by_config_options(const std::vector<t_conf
             || opt_key == "support_head_penetration"
             || opt_key == "support_head_width"
             || opt_key == "support_pillar_diameter"
+            || opt_key == "support_pillar_connection_mode"
             || opt_key == "support_base_diameter"
             || opt_key == "support_base_height"
             || opt_key == "support_critical_angle"

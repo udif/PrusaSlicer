@@ -1,4 +1,4 @@
-#include "libslic3r/GCodeSender.hpp"
+// #include "libslic3r/GCodeSender.hpp"
 #include "Tab.hpp"
 #include "PresetBundle.hpp"
 #include "PresetHints.hpp"
@@ -168,9 +168,12 @@ void Tab::create_preset_tab()
 	m_modified_label_clr	= wxGetApp().get_label_clr_modified();
 	m_default_text_clr		= wxGetApp().get_label_clr_default();
 
+    // Sizer with buttons for mode changing
+    m_mode_sizer = new PrusaModeSizer(panel);
+
 	m_hsizer = new wxBoxSizer(wxHORIZONTAL);
-	sizer->Add(m_hsizer, 0, wxBOTTOM, 3);
-	m_hsizer->Add(m_presets_choice, 1, wxLEFT | wxRIGHT | wxTOP | wxALIGN_CENTER_VERTICAL, 3);
+	sizer->Add(m_hsizer, 0, wxEXPAND | wxBOTTOM, 3);
+	m_hsizer->Add(m_presets_choice, 0, wxLEFT | wxRIGHT | wxTOP | wxALIGN_CENTER_VERTICAL, 3);
 	m_hsizer->AddSpacer(4);
 	m_hsizer->Add(m_btn_save_preset, 0, wxALIGN_CENTER_VERTICAL);
 	m_hsizer->AddSpacer(4);
@@ -182,6 +185,12 @@ void Tab::create_preset_tab()
 	m_hsizer->Add(m_undo_btn, 0, wxALIGN_CENTER_VERTICAL);
 	m_hsizer->AddSpacer(32);
 	m_hsizer->Add(m_question_btn, 0, wxALIGN_CENTER_VERTICAL);
+    // m_hsizer->AddStretchSpacer(32);
+    // StretchSpacer has a strange behavior under OSX, so 
+    // There is used just additional sizer for m_mode_sizer with right alignment
+    auto mode_sizer = new wxBoxSizer(wxVERTICAL);
+    mode_sizer->Add(m_mode_sizer, 1, wxALIGN_RIGHT);
+    m_hsizer->Add(mode_sizer, 1, wxALIGN_CENTER_VERTICAL | wxRIGHT, wxOSX ? 15 : 5);
 
 	//Horizontal sizer to hold the tree and the selected page.
 	m_hsizer = new wxBoxSizer(wxHORIZONTAL);
@@ -209,7 +218,7 @@ void Tab::create_preset_tab()
 	m_presets_choice->Bind(wxEVT_COMBOBOX, ([this](wxCommandEvent e) {
 		//! Because of The MSW and GTK version of wxBitmapComboBox derived from wxComboBox, 
 		//! but the OSX version derived from wxOwnerDrawnCombo, instead of:
-		//! select_preset(m_presets_choice->GetStringSelection().ToStdString()); 
+		//! select_preset(m_presets_choice->GetStringSelection().ToUTF8().data()); 
 		//! we doing next:
 		int selected_item = m_presets_choice->GetSelection();
 		if (m_selected_preset_item == selected_item && !m_presets->current_is_dirty())
@@ -236,9 +245,6 @@ void Tab::create_preset_tab()
 	// Initialize the DynamicPrintConfig by default keys/values.
 	build();
 	rebuild_page_tree();
-// 	update();
-    // Load the currently selected preset into the GUI, update the preset selection box.
-    load_current_preset();
 }
 
 void Tab::load_initial_data()
@@ -669,16 +675,17 @@ void Tab::reload_config()
 
 void Tab::update_visibility()
 {
-    const ConfigOptionMode mode = wxGetApp().get_opt_mode();
+    const ConfigOptionMode mode = wxGetApp().get_mode();
     Freeze();
 
 	for (auto page : m_pages)
         page->update_visibility(mode);
     update_page_tree_visibility();
 
-    m_hsizer->Layout();
-    Refresh();
+    // update mode for ModeSizer
+    m_mode_sizer->SetMode(mode);
 
+    Layout();
 	Thaw();
 
     // to update tree items color
@@ -741,8 +748,8 @@ void Tab::on_value_change(const std::string& opt_key, const boost::any& value)
 	wxPostEvent(this, event);
 
 
-    auto og_freq_chng_params = wxGetApp().sidebar().og_freq_chng_params();
-	if (opt_key == "fill_density")
+    ConfigOptionsGroup* og_freq_chng_params = wxGetApp().sidebar().og_freq_chng_params(supports_printer_technology(ptFFF));
+    if (opt_key == "fill_density" || opt_key == "supports_enable" || opt_key == "pad_enable")
 	{
         boost::any val = og_freq_chng_params->get_config_value(*m_config, opt_key);
         og_freq_chng_params->set_value(opt_key, val);
@@ -871,8 +878,20 @@ void Tab::update_preset_description_line()
 
 void Tab::update_frequently_changed_parameters()
 {
-    auto og_freq_chng_params = wxGetApp().sidebar().og_freq_chng_params();
+    auto og_freq_chng_params = wxGetApp().sidebar().og_freq_chng_params(supports_printer_technology(ptFFF));
     if (!og_freq_chng_params) return;
+
+    if (m_type == Preset::TYPE_SLA_PRINT)
+    {
+        for (auto opt_key : { "supports_enable", "pad_enable" })
+        {
+            boost::any val = og_freq_chng_params->get_config_value(*m_config, opt_key);
+            og_freq_chng_params->set_value(opt_key, val);
+        }
+        return;
+    }
+
+    // for m_type == Preset::TYPE_PRINT
     boost::any value = og_freq_chng_params->get_config_value(*m_config, "fill_density");
     og_freq_chng_params->set_value("fill_density", value);
 
@@ -1009,8 +1028,10 @@ void TabPrint::build()
 		optgroup = page->new_optgroup(_(L("Autospeed (advanced)")));
 		optgroup->append_single_option_line("max_print_speed");
 		optgroup->append_single_option_line("max_volumetric_speed");
+#ifdef HAS_PRESSURE_EQUALIZER
 		optgroup->append_single_option_line("max_volumetric_extrusion_rate_slope_positive");
 		optgroup->append_single_option_line("max_volumetric_extrusion_rate_slope_negative");
+#endif /* HAS_PRESSURE_EQUALIZER */
 
 	page = add_options_page(_(L("Multiple Extruders")), "funnel.png");
 		optgroup = page->new_optgroup(_(L("Extruders")));
@@ -1074,6 +1095,7 @@ void TabPrint::build()
 
 		optgroup = page->new_optgroup(_(L("Output file")));
 		optgroup->append_single_option_line("gcode_comments");
+		optgroup->append_single_option_line("gcode_label_objects");
 		option = optgroup->get_option("output_filename_format");
 		option.opt.full_width = true;
 		optgroup->append_single_option_line(option);
@@ -1122,6 +1144,13 @@ void TabPrint::update()
     if (m_preset_bundle->printers.get_selected_preset().printer_technology() == ptSLA)
         return; // ys_FIXME
 
+    //! Temporary workaround for the correct updates of the SpinCtrl (like "perimeters"):
+    // KillFocus() for the wxSpinCtrl use CallAfter function. So,
+    // to except the duplicate call of the update() after dialog->ShowModal(),
+    // let check if this process is already started.
+    if (is_msg_dlg_already_exist)   
+        return;
+
 	Freeze();
 
 	double fill_density = m_config->option<ConfigOptionPercent>("fill_density")->value;
@@ -1137,6 +1166,7 @@ void TabPrint::update()
 			"- no ensure_vertical_shell_thickness\n"
 			"\nShall I adjust those settings in order to enable Spiral Vase?"));
 		auto dialog = new wxMessageDialog(parent(), msg_text, _(L("Spiral Vase")), wxICON_WARNING | wxYES | wxNO);
+        is_msg_dlg_already_exist = true;
 		DynamicPrintConfig new_conf = *m_config;
 		if (dialog->ShowModal() == wxID_YES) {
 			new_conf.set_key_value("perimeters", new ConfigOptionInt(1));
@@ -1152,6 +1182,7 @@ void TabPrint::update()
 		}
 		load_config(new_conf);
 		on_value_change("fill_density", fill_density);
+        is_msg_dlg_already_exist = false;
 	}
 
 	if (m_config->opt_bool("wipe_tower") && m_config->opt_bool("support_material") &&
@@ -1559,11 +1590,11 @@ void TabPrinter::build_printhost(ConfigOptionsGroup *optgroup)
 		auto sizer = new wxBoxSizer(wxHORIZONTAL);
 		sizer->Add(btn);
 
-		btn->Bind(wxEVT_BUTTON, [this, parent, optgroup](wxCommandEvent e) {
+		btn->Bind(wxEVT_BUTTON, [this, parent, optgroup](wxCommandEvent &e) {
 			BonjourDialog dialog(parent);
 			if (dialog.show_and_lookup()) {
 				optgroup->set_value("print_host", std::move(dialog.get_selected()), true);
-				// FIXME: emit killfocus on the edit widget
+				optgroup->get_field("print_host")->field_changed();
 			}
 		});
 
@@ -1577,7 +1608,7 @@ void TabPrinter::build_printhost(ConfigOptionsGroup *optgroup)
 		auto sizer = new wxBoxSizer(wxHORIZONTAL);
 		sizer->Add(btn);
 
-		btn->Bind(wxEVT_BUTTON, [this](wxCommandEvent e) {
+		btn->Bind(wxEVT_BUTTON, [this](wxCommandEvent &e) {
 			std::unique_ptr<PrintHost> host(PrintHost::get_print_host(m_config));
 			if (! host) {
 				const auto text = wxString::Format("%s",
@@ -1618,6 +1649,7 @@ void TabPrinter::build_printhost(ConfigOptionsGroup *optgroup)
 				wxFileDialog openFileDialog(this, _(L("Open CA certificate file")), "", "", filemasks, wxFD_OPEN | wxFD_FILE_MUST_EXIST);
 				if (openFileDialog.ShowModal() != wxID_CANCEL) {
 					optgroup->set_value("printhost_cafile", std::move(openFileDialog.GetPath()), true);
+					optgroup->get_field("printhost_cafile")->field_changed();
 				}
 			});
 
@@ -1981,7 +2013,7 @@ PageShp TabPrinter::build_kinematics_page()
 
 	if (m_use_silent_mode)	{
 		// Legend for OptionsGroups
-		auto optgroup = page->new_optgroup(_(L("")));
+		auto optgroup = page->new_optgroup("");
 		optgroup->set_show_modified_btns_val(false);
 		optgroup->label_width = 230;
 		auto line = Line{ "", "" };
@@ -2283,16 +2315,18 @@ void TabPrinter::update_sla()
 // Initialize the UI from the current preset
 void Tab::load_current_preset()
 {
-	auto preset = m_presets->get_edited_preset();
+	const Preset& preset = m_presets->get_edited_preset();
 
 	(preset.is_default || preset.is_system) ? m_btn_delete_preset->Disable() : m_btn_delete_preset->Enable(true);
 
     update();
-    // For the printer profile, generate the extruder pages.
-    if (preset.printer_technology() == ptFFF)
-        on_preset_loaded();
-    else
-        wxGetApp().sidebar().update_objects_list_extruder_column(1);
+	if (m_name == "printer") {
+		// For the printer profile, generate the extruder pages.
+		if (preset.printer_technology() == ptFFF)
+			on_preset_loaded();
+		else
+			wxGetApp().sidebar().update_objects_list_extruder_column(1);
+	}
     // Reload preset pages with the new configuration values.
     reload_config();
 
@@ -2302,11 +2336,14 @@ void Tab::load_current_preset()
 
 	m_undo_to_sys_btn->Enable(!preset.is_default);
 
+#if 0
 	// use CallAfter because some field triggers schedule on_change calls using CallAfter,
 	// and we don't want them to be called after this update_dirty() as they would mark the 
 	// preset dirty again
 	// (not sure this is true anymore now that update_dirty is idempotent)
-	wxTheApp->CallAfter([this]{
+	wxTheApp->CallAfter([this]
+#endif
+	{
 		// checking out if this Tab exists till this moment
 		if (!wxGetApp().checked_tab(this))
 			return;
@@ -2314,14 +2351,20 @@ void Tab::load_current_preset()
 
         // update show/hide tabs
         if (m_name == "printer") {
-            PrinterTechnology& printer_technology = m_presets->get_edited_preset().printer_technology();
+            const PrinterTechnology printer_technology = m_presets->get_edited_preset().printer_technology();
             if (printer_technology != static_cast<TabPrinter*>(this)->m_printer_technology)
             {
                 for (auto tab : wxGetApp().tabs_list) {
                     if (tab->type() == Preset::TYPE_PRINTER) // Printer tab is shown every time
                         continue;
                     if (tab->supports_printer_technology(printer_technology))
+                    {
                         wxGetApp().tab_panel()->InsertPage(wxGetApp().tab_panel()->FindPage(this), tab, tab->title());
+                        #ifdef __linux__ // the tabs apparently need to be explicitly shown on Linux (pull request #1563)
+                            int page_id = wxGetApp().tab_panel()->FindPage(tab);
+                            wxGetApp().tab_panel()->GetPage(page_id)->Show(true);
+                        #endif // __linux__
+                    }
                     else {
                         int page_id = wxGetApp().tab_panel()->FindPage(tab);
                         wxGetApp().tab_panel()->GetPage(page_id)->Show(false);
@@ -2340,7 +2383,7 @@ void Tab::load_current_preset()
 		}
 		else {
 			on_presets_changed();
-			if (m_name == "print")
+            if (m_type == Preset::TYPE_SLA_PRINT || m_type == Preset::TYPE_PRINT)// if (m_name == "print")
 				update_frequently_changed_parameters();
 		}
 
@@ -2348,7 +2391,10 @@ void Tab::load_current_preset()
 		init_options_list();
         update_visibility();
 		update_changed_ui();
-	});
+	}
+#if 0
+	);
+#endif
 }
 
 //Regerenerate content of the page tree.
@@ -2422,7 +2468,6 @@ void Tab::select_preset(std::string preset_name)
 	bool print_tab     = m_presets->type() == Preset::TYPE_PRINT || m_presets->type() == Preset::TYPE_SLA_PRINT;
 	bool printer_tab   = m_presets->type() == Preset::TYPE_PRINTER;
 	bool canceled      = false;
-// 	m_reload_dependent_tabs = {};
 	m_dependent_tabs = {};
 	if (current_dirty && !may_discard_current_dirty_preset()) {
 		canceled = true;
@@ -2518,19 +2563,20 @@ bool Tab::may_discard_current_dirty_preset(PresetCollection* presets /*= nullptr
 	std::string   type_name  = presets->name();
 	wxString      tab        = "          ";
 	wxString      name       = old_preset.is_default ?
-		_(L("Default ")) + type_name + _(L(" preset")) :
-		(type_name + _(L(" preset\n")) + tab + old_preset.name);
+		wxString::Format(_(L("Default preset (%s)")), _(type_name)) :                       //_(L("Default ")) + type_name + _(L(" preset")) :                
+		wxString::Format(_(L("Preset (%s)")), _(type_name)) + "\n" + tab + old_preset.name; //type_name + _(L(" preset\n")) + tab + old_preset.name;
+
 	// Collect descriptions of the dirty options.
 	wxString changes;
 	for (const std::string &opt_key : presets->current_dirty_options()) {
 		const ConfigOptionDef &opt = m_config->def()->options.at(opt_key);
-		std::string name = "";
+		/*std::string*/wxString name = "";
 		if (! opt.category.empty())
-			name += opt.category + " > ";
+			name += _(opt.category) + " > ";
 		name += !opt.full_label.empty() ?
-				opt.full_label : 
-				opt.label;
-		changes += tab + from_u8(name) + "\n";
+				_(opt.full_label) : 
+				_(opt.label);
+		changes += tab + /*from_u8*/(name) + "\n";
 	}
 	// Show a confirmation dialog with the list of dirty options.
 	wxString message = name + "\n\n";
@@ -2544,7 +2590,7 @@ bool Tab::may_discard_current_dirty_preset(PresetCollection* presets /*= nullptr
 		message += _(L("and it has the following unsaved changes:"));
 	}
 	auto confirm = new wxMessageDialog(parent(),
-		message + "\n" + changes + _(L("\n\nDiscard changes and continue anyway?")),
+		message + "\n" + changes + "\n\n" + _(L("Discard changes and continue anyway?")),
 		_(L("Unsaved Changes")), wxYES_NO | wxNO_DEFAULT | wxICON_QUESTION);
 	return confirm->ShowModal() == wxID_YES;
 }
@@ -2556,8 +2602,8 @@ bool Tab::may_switch_to_SLA_preset()
     if (wxGetApp().obj_list()->has_multi_part_objects())
     {
         show_info( parent(), 
-                    _(L("It's impossible to print multi-part object(s) with SLA technology.")) + 
-                    _(L("\n\nPlease check your object list before preset changing.")),
+                    _(L("It's impossible to print multi-part object(s) with SLA technology.")) + "\n\n" +
+                    _(L("Please check your object list before preset changing.")),
                     _(L("Attention!")) );
         return false;
     }
@@ -2798,7 +2844,7 @@ wxSizer* Tab::compatible_widget_create(wxWindow* parent, PresetDependencies &dep
 			selections.Clear();
 			selections = dlg.GetSelections();
 			for (auto idx : selections)
-				value.push_back(presets[idx].ToStdString());
+				value.push_back(presets[idx].ToUTF8().data());
 			if (value.empty()) {
 				deps.checkbox->SetValue(1);
 				deps.btn->Disable();
@@ -3142,6 +3188,7 @@ void TabSLAPrint::build()
 
     optgroup = page->new_optgroup(_(L("Support pillar")));
     optgroup->append_single_option_line("support_pillar_diameter");
+    optgroup->append_single_option_line("support_pillar_connection_mode");
     optgroup->append_single_option_line("support_pillar_widening_factor");
     optgroup->append_single_option_line("support_base_diameter");
     optgroup->append_single_option_line("support_base_height");

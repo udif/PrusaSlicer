@@ -4,6 +4,7 @@
 #include "WipeTowerDialog.hpp"
 
 #include <assert.h>
+#include <string>
 
 #include <boost/lexical_cast.hpp>
 #include <boost/algorithm/string.hpp>
@@ -72,6 +73,30 @@ void break_to_debugger()
     if (IsDebuggerPresent())
         DebugBreak();
     #endif /* _WIN32 */
+}
+
+const std::string& shortkey_ctrl_prefix()
+{
+	static const std::string str = 
+#ifdef __APPLE__
+		"⌘"
+#else
+		"Ctrl+"
+#endif
+		;
+	return str;
+}
+
+const std::string& shortkey_alt_prefix()
+{
+	static const std::string str = 
+#ifdef __APPLE__
+		"⌥"
+#else
+		"Alt+"
+#endif
+		;
+	return str;
 }
 
 bool config_wizard_startup(bool app_config_exists)
@@ -147,19 +172,21 @@ void change_opt_value(DynamicPrintConfig& config, const t_config_option_key& opt
 			config.set_key_value(opt_key, new ConfigOptionString(boost::any_cast<std::string>(value)));
 			break;
 		case coStrings:{
-			if (opt_key == "compatible_prints" || opt_key == "compatible_printers" || opt_key == "post_process") {
+			if (opt_key == "compatible_prints" || opt_key == "compatible_printers") {
 				config.option<ConfigOptionStrings>(opt_key)->values = 
 					boost::any_cast<std::vector<std::string>>(value);
 			}
 			else if (config.def()->get(opt_key)->gui_flags.compare("serialized") == 0) {
 				std::string str = boost::any_cast<std::string>(value);
-				if (str.back() == ';') str.pop_back();
-				// Split a string to multiple strings by a semi - colon.This is the old way of storing multi - string values.
-				// Currently used for the post_process config value only.
-				std::vector<std::string> values;
-				boost::split(values, str, boost::is_any_of(";"));
-				if (values.size() == 1 && values[0] == "") 
-					values.resize(0);//break;
+                std::vector<std::string> values {};
+                if (!str.empty()) {
+				    if (str.back() == ';') str.pop_back();
+				    // Split a string to multiple strings by a semi - colon.This is the old way of storing multi - string values.
+				    // Currently used for the post_process config value only.
+				    boost::split(values, str, boost::is_any_of(";"));
+				    if (values.size() == 1 && values[0] == "")
+					    values.resize(0);
+                }
 				config.option<ConfigOptionStrings>(opt_key)->values = values;
 			}
 			else{
@@ -197,6 +224,8 @@ void change_opt_value(DynamicPrintConfig& config, const t_config_option_key& opt
 				config.set_key_value(opt_key, new ConfigOptionEnum<PrintHostType>(boost::any_cast<PrintHostType>(value)));
 			else if (opt_key.compare("display_orientation") == 0)
 				config.set_key_value(opt_key, new ConfigOptionEnum<SLADisplayOrientation>(boost::any_cast<SLADisplayOrientation>(value)));
+            else if(opt_key.compare("support_pillar_connection_mode") == 0)
+                config.set_key_value(opt_key, new ConfigOptionEnum<SLAPillarConnectionMode>(boost::any_cast<SLAPillarConnectionMode>(value)));
 			}
 			break;
 		case coPoints:{
@@ -229,7 +258,7 @@ void show_error(wxWindow* parent, const wxString& message)
 void show_error_id(int id, const std::string& message)
 {
 	auto *parent = id != 0 ? wxWindow::FindWindowById(id) : nullptr;
-	show_error(parent, wxString::FromUTF8(message.data()));
+	show_error(parent, from_u8(message));
 }
 
 void show_info(wxWindow* parent, const wxString& message, const wxString& title)
@@ -240,8 +269,6 @@ void show_info(wxWindow* parent, const wxString& message, const wxString& title)
 
 void warning_catcher(wxWindow* parent, const wxString& message)
 {
-	if (message == "GLUquadricObjPtr | " + _(L("Attempt to free unreferenced scalar")) )
-		return;
 	wxMessageDialog msg(parent, message, _(L("Warning")), wxOK | wxICON_WARNING);
 	msg.ShowModal();
 }
@@ -314,6 +341,20 @@ std::string into_u8(const wxString &str)
 	return std::string(buffer_utf8.data());
 }
 
+wxString from_path(const boost::filesystem::path &path)
+{
+#ifdef _WIN32
+	return wxString(path.string<std::wstring>());
+#else
+	return from_u8(path.string<std::string>());
+#endif
+}
+
+boost::filesystem::path into_path(const wxString &str)
+{
+	return boost::filesystem::path(str.wx_str());
+}
+
 bool get_current_screen_size(wxWindow *window, unsigned &width, unsigned &height)
 {
 	const auto idx = wxDisplay::GetFromWindow(window);
@@ -329,50 +370,6 @@ bool get_current_screen_size(wxWindow *window, unsigned &width, unsigned &height
 	return true;
 }
 
-void save_window_size(wxTopLevelWindow *window, const std::string &name)
-{
-	const wxSize size = window->GetSize();
-	const wxPoint pos = window->GetPosition();
-	const auto maximized = window->IsMaximized() ? "1" : "0";
-
-	get_app_config()->set((boost::format("window_%1%_size") % name).str(), (boost::format("%1%;%2%") % size.GetWidth() % size.GetHeight()).str());
-	get_app_config()->set((boost::format("window_%1%_maximized") % name).str(), maximized);
-}
-
-void restore_window_size(wxTopLevelWindow *window, const std::string &name)
-{
-	// XXX: This still doesn't behave nicely in some situations (mostly on Linux).
-	// The problem is that it's hard to obtain window position with respect to screen geometry reliably
-	// from wxWidgets. Sometimes wxWidgets claim a window is located on a different screen than on which
-	// it's actually visible. I suspect this has something to do with window initialization (maybe we
-	// restore window geometry too early), but haven't yet found a workaround.
-
-	const auto display_idx = wxDisplay::GetFromWindow(window);
-	if (display_idx == wxNOT_FOUND) { return; }
-
-	const auto display = wxDisplay(display_idx).GetClientArea();
-	std::vector<std::string> pair;
-
-	try {
-		const auto key_size = (boost::format("window_%1%_size") % name).str();
-		if (get_app_config()->has(key_size)) {
-			if (unescape_strings_cstyle(get_app_config()->get(key_size), pair) && pair.size() == 2) {
-				auto width = boost::lexical_cast<int>(pair[0]);
-				auto height = boost::lexical_cast<int>(pair[1]);
-
-				window->SetSize(width, height);
-			}
-		}
-	} catch(const boost::bad_lexical_cast &) {}
-
-	// Maximizing should be the last thing to do.
-	// This ensure the size and position are sane when the user un-maximizes the window.
-	const auto key_maximized = (boost::format("window_%1%_maximized") % name).str();
-	if (get_app_config()->get(key_maximized) == "1") {
-		window->Maximize(true);
-	}
-}
-
 void about()
 {
     AboutDialog dlg;
@@ -386,7 +383,7 @@ void desktop_open_datadir_folder()
 
 	const auto path = data_dir();
 #ifdef _WIN32
-		const auto widepath = wxString::FromUTF8(path.data());
+		const wxString widepath = from_u8(path);
 		const wchar_t *argv[] = { L"explorer", widepath.GetData(), nullptr };
 		::wxExecute(const_cast<wchar_t**>(argv), wxEXEC_ASYNC, nullptr);
 #elif __APPLE__

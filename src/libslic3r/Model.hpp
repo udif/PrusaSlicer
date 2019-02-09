@@ -11,9 +11,7 @@
 #include <string>
 #include <utility>
 #include <vector>
-#if ENABLE_MODELVOLUME_TRANSFORM
 #include "Geometry.hpp"
-#endif // ENABLE_MODELVOLUME_TRANSFORM
 
 namespace Slic3r {
 
@@ -173,12 +171,8 @@ public:
     // Variation of a layer thickness for spans of Z coordinates.
     t_layer_height_ranges   layer_height_ranges;
     // Profile of increasing z to a layer height, to be linearly interpolated when calculating the layers.
-    // The pairs of <z, layer_height> are packed into a 1D array to simplify handling by the Perl XS.
+    // The pairs of <z, layer_height> are packed into a 1D array.
     std::vector<coordf_t>   layer_height_profile;
-    // layer_height_profile is initialized when the layer editing mode is entered.
-    // Only if the user really modified the layer height, layer_height_profile_valid is set
-    // and used subsequently by the PrintObject.
-    bool                    layer_height_profile_valid;
 
     // This vector holds position of selected support points for SLA. The data are
     // saved in mesh coordinates to allow using them for several instances.
@@ -203,7 +197,7 @@ public:
 
     ModelInstance*          add_instance(int idx = -1);
     ModelInstance*          add_instance(const ModelInstance &instance);
-    ModelInstance*          add_instance(const Vec3d &offset, const Vec3d &scaling_factor, const Vec3d &rotation);
+    ModelInstance*          add_instance(const Vec3d &offset, const Vec3d &scaling_factor, const Vec3d &rotation, const Vec3d &mirror);
     void                    delete_instance(size_t idx);
     void                    delete_last_instance();
     void                    clear_instances();
@@ -212,7 +206,7 @@ public:
     // This bounding box is approximate and not snug.
     // This bounding box is being cached.
     const BoundingBoxf3& bounding_box() const;
-    void invalidate_bounding_box() { m_bounding_box_valid = false; }
+    void invalidate_bounding_box() { m_bounding_box_valid = false; m_raw_mesh_bounding_box_valid = false; }
 
     // A mesh containing all transformed instances of this object.
     TriangleMesh mesh() const;
@@ -226,6 +220,16 @@ public:
     BoundingBoxf3 raw_bounding_box() const;
     // A snug bounding box around the transformed non-modifier object volumes.
     BoundingBoxf3 instance_bounding_box(size_t instance_idx, bool dont_translate = false) const;
+	// A snug bounding box of non-transformed (non-rotated, non-scaled, non-translated) sum of non-modifier object volumes.
+	BoundingBoxf3 raw_mesh_bounding_box() const;
+	// A snug bounding box of non-transformed (non-rotated, non-scaled, non-translated) sum of all object volumes.
+    BoundingBoxf3 full_raw_mesh_bounding_box() const;
+
+    // Calculate 2D convex hull of of a projection of the transformed printable volumes into the XY plane.
+    // This method is cheap in that it does not make any unnecessary copy of the volume meshes.
+    // This method is used by the auto arrange function.
+    Polygon       convex_hull_2d(const Transform3d &trafo_instance);
+
     void center_around_origin();
     void ensure_on_bed();
     void translate_instances(const Vec3d& vector);
@@ -264,7 +268,8 @@ protected:
     void        set_model(Model *model) { m_model = model; }
 
 private:
-    ModelObject(Model *model) : layer_height_profile_valid(false), m_model(model), origin_translation(Vec3d::Zero()), m_bounding_box_valid(false) {}
+    ModelObject(Model *model) : m_model(model), origin_translation(Vec3d::Zero()), 
+        m_bounding_box_valid(false), m_raw_mesh_bounding_box_valid(false) {}
     ~ModelObject();
 
     /* To be able to return an object from own copy / clone methods. Hopefully the compiler will do the "Copy elision" */
@@ -283,6 +288,8 @@ private:
     // Bounding box, cached.
     mutable BoundingBoxf3 m_bounding_box;
     mutable bool          m_bounding_box_valid;
+    mutable BoundingBoxf3 m_raw_mesh_bounding_box;
+    mutable bool          m_raw_mesh_bounding_box_valid;    
 };
 
 // An object STL, or a modifier volume, over which a different set of parameters shall be applied.
@@ -322,6 +329,9 @@ public:
     // Extruder ID is only valid for FFF. Returns -1 for SLA or if the extruder ID is not applicable (support volumes).
     int                 extruder_id() const;
 
+    void                set_splittable(const int val) { m_is_splittable = val; }
+    int                 is_splittable() const { return m_is_splittable; }
+
     // Split this volume, append the result to the object owning this volume.
     // Return the number of volumes created from this one.
     // This is useful to assign different materials to different volumes of an object.
@@ -337,10 +347,8 @@ public:
 
     void                scale_geometry(const Vec3d& versor);
 
-#if ENABLE_MODELVOLUME_TRANSFORM
     // translates the mesh and the convex hull so that the origin of their vertices is in the center of this volume's bounding box
     void                center_geometry();
-#endif // ENABLE_MODELVOLUME_TRANSFORM
 
     void                calculate_convex_hull();
     const TriangleMesh& get_convex_hull() const;
@@ -349,7 +357,6 @@ public:
     static Type         type_from_string(const std::string &s);
     static std::string  type_to_string(const Type t);
 
-#if ENABLE_MODELVOLUME_TRANSFORM
     const Geometry::Transformation& get_transformation() const { return m_transformation; }
     void set_transformation(const Geometry::Transformation& transformation) { m_transformation = transformation; }
 
@@ -378,7 +385,8 @@ public:
     void set_mirror(Axis axis, double mirror) { m_transformation.set_mirror(axis, mirror); }
 
     const Transform3d& get_matrix(bool dont_translate = false, bool dont_rotate = false, bool dont_scale = false, bool dont_mirror = false) const { return m_transformation.get_matrix(dont_translate, dont_rotate, dont_scale, dont_mirror); }
-#endif // ENABLE_MODELVOLUME_TRANSFORM
+
+    using ModelBase::set_new_unique_id;
 
 protected:
 	friend class Print;
@@ -396,9 +404,13 @@ private:
     t_model_material_id     m_material_id;
     // The convex hull of this model's mesh.
     TriangleMesh             m_convex_hull;
-#if ENABLE_MODELVOLUME_TRANSFORM
     Geometry::Transformation m_transformation;
-#endif // ENABLE_MODELVOLUME_TRANSFORM
+
+    // flag to optimize the checking if the volume is splittable
+    //     -1   ->   is unknown value (before first cheking)
+    //      0   ->   is not splittable
+    //      1   ->   is splittable
+    int                     m_is_splittable {-1};
 
     ModelVolume(ModelObject *object, const TriangleMesh &mesh) : mesh(mesh), m_type(MODEL_PART), object(object)
     {
@@ -408,7 +420,6 @@ private:
     ModelVolume(ModelObject *object, TriangleMesh &&mesh, TriangleMesh &&convex_hull) :
         mesh(std::move(mesh)), m_convex_hull(std::move(convex_hull)), m_type(MODEL_PART), object(object) {}
 
-#if ENABLE_MODELVOLUME_TRANSFORM
     // Copying an existing volume, therefore this volume will get a copy of the ID assigned.
     ModelVolume(ModelObject *object, const ModelVolume &other) :
         ModelBase(other), // copy the ID
@@ -424,25 +435,6 @@ private:
         if (mesh.stl.stats.number_of_facets > 1)
             calculate_convex_hull();
     }
-#else
-    // Copying an existing volume, therefore this volume will get a copy of the ID assigned.
-    ModelVolume(ModelObject *object, const ModelVolume &other) :
-        ModelBase(other), // copy the ID
-        name(other.name), mesh(other.mesh), m_convex_hull(other.m_convex_hull), config(other.config), m_type(other.m_type), object(object)
-    {
-		if (! other.material_id().empty())
-			this->set_material_id(other.material_id());
-    }
-    // Providing a new mesh, therefore this volume will get a new unique ID assigned.
-    ModelVolume(ModelObject *object, const ModelVolume &other, TriangleMesh &&mesh) :
-        name(other.name), mesh(std::move(mesh)), config(other.config), m_type(other.m_type), object(object)
-    {
-		if (! other.material_id().empty())
-			this->set_material_id(other.material_id());
-        if (mesh.stl.stats.number_of_facets > 1)
-            calculate_convex_hull();
-    }
-#endif // ENABLE_MODELVOLUME_TRANSFORM
 
     ModelVolume& operator=(ModelVolume &rhs) = delete;
 };
@@ -461,14 +453,7 @@ public:
     };
 
 private:
-#if ENABLE_MODELVOLUME_TRANSFORM
     Geometry::Transformation m_transformation;
-#else
-    Vec3d m_offset;              // in unscaled coordinates
-    Vec3d m_rotation;            // Rotation around the three axes, in radians around mesh center point
-    Vec3d m_scaling_factor;      // Scaling factors along the three axes
-    Vec3d m_mirror;              // Mirroring along the three axes
-#endif // ENABLE_MODELVOLUME_TRANSFORM
 
 public:
     // flag showing the position of this instance with respect to the print volume (set by Print::validate() using ModelObject::check_instances_print_volume_state())
@@ -476,7 +461,6 @@ public:
 
     ModelObject* get_object() const { return this->object; }
 
-#if ENABLE_MODELVOLUME_TRANSFORM
     const Geometry::Transformation& get_transformation() const { return m_transformation; }
     void set_transformation(const Geometry::Transformation& transformation) { m_transformation = transformation; }
 
@@ -492,7 +476,7 @@ public:
     void set_rotation(const Vec3d& rotation) { m_transformation.set_rotation(rotation); }
     void set_rotation(Axis axis, double rotation) { m_transformation.set_rotation(axis, rotation); }
 
-    Vec3d get_scaling_factor() const { return m_transformation.get_scaling_factor(); }
+    const Vec3d& get_scaling_factor() const { return m_transformation.get_scaling_factor(); }
     double get_scaling_factor(Axis axis) const { return m_transformation.get_scaling_factor(axis); }
 
     void set_scaling_factor(const Vec3d& scaling_factor) { m_transformation.set_scaling_factor(scaling_factor); }
@@ -503,31 +487,6 @@ public:
 
     void set_mirror(const Vec3d& mirror) { m_transformation.set_mirror(mirror); }
     void set_mirror(Axis axis, double mirror) { m_transformation.set_mirror(axis, mirror); }
-#else
-    const Vec3d& get_offset() const { return m_offset; }
-    double get_offset(Axis axis) const { return m_offset(axis); }
-
-    void set_offset(const Vec3d& offset) { m_offset = offset; }
-    void set_offset(Axis axis, double offset) { m_offset(axis) = offset; }
-
-    const Vec3d& get_rotation() const { return m_rotation; }
-    double get_rotation(Axis axis) const { return m_rotation(axis); }
-
-    void set_rotation(const Vec3d& rotation);
-    void set_rotation(Axis axis, double rotation);
-
-    Vec3d get_scaling_factor() const { return m_scaling_factor; }
-    double get_scaling_factor(Axis axis) const { return m_scaling_factor(axis); }
-
-    void set_scaling_factor(const Vec3d& scaling_factor);
-    void set_scaling_factor(Axis axis, double scaling_factor);
-
-    const Vec3d& get_mirror() const { return m_mirror; }
-    double get_mirror(Axis axis) const { return m_mirror(axis); }
-
-    void set_mirror(const Vec3d& mirror);
-    void set_mirror(Axis axis, double mirror);
-#endif // ENABLE_MODELVOLUME_TRANSFORM
 
     // To be called on an external mesh
     void transform_mesh(TriangleMesh* mesh, bool dont_translate = false) const;
@@ -540,11 +499,7 @@ public:
     // To be called on an external polygon. It does not translate the polygon, only rotates and scales.
     void transform_polygon(Polygon* polygon) const;
 
-#if ENABLE_MODELVOLUME_TRANSFORM
     const Transform3d& get_matrix(bool dont_translate = false, bool dont_rotate = false, bool dont_scale = false, bool dont_mirror = false) const { return m_transformation.get_matrix(dont_translate, dont_rotate, dont_scale, dont_mirror); }
-#else
-    Transform3d get_matrix(bool dont_translate = false, bool dont_rotate = false, bool dont_scale = false, bool dont_mirror = false) const;
-#endif // ENABLE_MODELVOLUME_TRANSFORM
 
     bool is_printable() const { return print_volume_state == PVS_Inside; }
 
@@ -560,17 +515,11 @@ private:
     // Parent object, owning this instance.
     ModelObject* object;
 
-#if ENABLE_MODELVOLUME_TRANSFORM
     // Constructor, which assigns a new unique ID.
     explicit ModelInstance(ModelObject *object) : object(object), print_volume_state(PVS_Inside) {}
     // Constructor, which assigns a new unique ID.
     explicit ModelInstance(ModelObject *object, const ModelInstance &other) :
         m_transformation(other.m_transformation), object(object), print_volume_state(PVS_Inside) {}
-#else
-    explicit ModelInstance(ModelObject *object) : m_offset(Vec3d::Zero()), m_rotation(Vec3d::Zero()), m_scaling_factor(Vec3d::Ones()), m_mirror(Vec3d::Ones()), object(object), print_volume_state(PVS_Inside) {}
-    explicit ModelInstance(ModelObject *object, const ModelInstance &other) :
-        m_offset(other.m_offset), m_rotation(other.m_rotation), m_scaling_factor(other.m_scaling_factor), m_mirror(other.m_mirror), object(object), print_volume_state(PVS_Inside) {}
-#endif // ENABLE_MODELVOLUME_TRANSFORM
 
     ModelInstance() = delete;
     explicit ModelInstance(ModelInstance &&rhs) = delete;
@@ -663,8 +612,8 @@ public:
     static std::string get_auto_extruder_id_as_string(unsigned int max_extruders);
     static void reset_auto_extruder_id();
 
-    // Propose an output file name based on the first printable object's name.
-    std::string         propose_export_file_name() const;
+    // Propose an output file name & path based on the first printable object's name and source input file's path.
+    std::string         propose_export_file_name_and_path() const;
 
 private:
     MODELBASE_DERIVED_PRIVATE_COPY_MOVE(Model)
@@ -685,11 +634,11 @@ extern bool model_object_list_extended(const Model &model_old, const Model &mode
 // than the old ModelObject.
 extern bool model_volume_list_changed(const ModelObject &model_object_old, const ModelObject &model_object_new, const ModelVolume::Type type);
 
-#ifdef _DEBUG
+#ifndef NDEBUG
 // Verify whether the IDs of Model / ModelObject / ModelVolume / ModelInstance / ModelMaterial are valid and unique.
 void check_model_ids_validity(const Model &model);
 void check_model_ids_equal(const Model &model1, const Model &model2);
-#endif /* _DEBUG */
+#endif /* NDEBUG */
 
 }
 

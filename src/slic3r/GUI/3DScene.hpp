@@ -9,6 +9,21 @@
 #include "libslic3r/Model.hpp"
 #include "slic3r/GUI/GLCanvas3DManager.hpp"
 
+#include <functional>
+
+#ifndef NDEBUG
+#define HAS_GLSAFE
+#endif
+
+#ifdef HAS_GLSAFE
+extern void glAssertRecentCallImpl();
+inline void glAssertRecentCall() { glAssertRecentCallImpl(); }
+#define glsafe(cmd) do { cmd; glAssertRecentCallImpl(); } while (false)
+#else
+inline void glAssertRecentCall() { }
+#define glsafe(cmd) cmd
+#endif
+
 namespace Slic3r {
 
 class Print;
@@ -199,50 +214,7 @@ private:
     }
 };
 
-class LayersTexture
-{
-public:
-    LayersTexture() : width(0), height(0), levels(0), cells(0) {}
-
-    // Texture data
-    std::vector<char>   data;
-    // Width of the texture, top level.
-    size_t              width;
-    // Height of the texture, top level.
-    size_t              height;
-    // For how many levels of detail is the data allocated?
-    size_t              levels;
-    // Number of texture cells allocated for the height texture.
-    size_t              cells;
-};
-
 class GLVolume {
-    struct LayerHeightTextureData
-    {
-        // ID of the layer height texture
-        unsigned int texture_id;
-        // ID of the shader used to render with the layer height texture
-        unsigned int shader_id;
-        // The print object to update when generating the layer height texture
-        const PrintObject* print_object;
-
-        float        z_cursor_relative;
-        float        edit_band_width;
-
-        LayerHeightTextureData() { reset(); }
-
-        void reset()
-        {
-            texture_id = 0;
-            shader_id = 0;
-            print_object = nullptr;
-            z_cursor_relative = 0.0f;
-            edit_band_width = 0.0f;
-        }
-
-        bool can_use() const { return (texture_id > 0) && (shader_id > 0) && (print_object != nullptr); }
-    };
-
 public:
     static const float SELECTED_COLOR[4];
     static const float HOVER_COLOR[4];
@@ -257,23 +229,9 @@ public:
     ~GLVolume();
 
 private:
-#if ENABLE_MODELVOLUME_TRANSFORM
     Geometry::Transformation m_instance_transformation;
     Geometry::Transformation m_volume_transformation;
-#else
-    // Offset of the volume to be rendered.
-    Vec3d                 m_offset;
-    // Rotation around three axes of the volume to be rendered.
-    Vec3d                 m_rotation;
-    // Scale factor along the three axes of the volume to be rendered.
-    Vec3d                 m_scaling_factor;
-    // Mirroring along the three axes of the volume to be rendered.
-    Vec3d m_mirror;
-    // World matrix of the volume to be rendered.
-    mutable Transform3f   m_world_matrix;
-    // Whether or not is needed to recalculate the world matrix.
-    mutable bool          m_world_matrix_dirty;
-#endif // ENABLE_MODELVOLUME_TRANSFORM
+
     // Shift in z required by sla supports+pad
     double                m_sla_shift_z;
     // Bounding box of this volume, in unscaled coordinates.
@@ -337,6 +295,8 @@ public:
     bool                is_wipe_tower;
     // Wheter or not this volume has been generated from an extrusion path
     bool                is_extrusion_path;
+    // Wheter or not to always render this volume using its own alpha 
+    bool                force_transparent;
 
     // Interleaved triangles & normals with indexed triangles & quads.
     GLIndexedVertexArray        indexed_vertex_array;
@@ -357,7 +317,6 @@ public:
     // set color according to model volume
     void set_color_from_model_volume(const ModelVolume *model_volume);
 
-#if ENABLE_MODELVOLUME_TRANSFORM
     const Geometry::Transformation& get_instance_transformation() const { return m_instance_transformation; }
     void set_instance_transformation(const Geometry::Transformation& transformation) { m_instance_transformation = transformation; set_bounding_boxes_as_dirty(); }
 
@@ -411,21 +370,6 @@ public:
 
     void set_volume_mirror(const Vec3d& mirror) { m_volume_transformation.set_mirror(mirror); set_bounding_boxes_as_dirty(); }
     void set_volume_mirror(Axis axis, double mirror) { m_volume_transformation.set_mirror(axis, mirror); set_bounding_boxes_as_dirty(); }
-#else
-    const Vec3d& get_rotation() const;
-    void set_rotation(const Vec3d& rotation);
-
-    const Vec3d& get_scaling_factor() const;
-    void set_scaling_factor(const Vec3d& scaling_factor);
-
-    const Vec3d& get_mirror() const;
-    double get_mirror(Axis axis) const;
-    void set_mirror(const Vec3d& mirror);
-    void set_mirror(Axis axis, double mirror);
-
-    const Vec3d& get_offset() const;
-    void set_offset(const Vec3d& offset);
-#endif // ENABLE_MODELVOLUME_TRANSFORM
      
     double get_sla_shift_z() const { return m_sla_shift_z; }
     void set_sla_shift_z(double z) { m_sla_shift_z = z; }
@@ -436,11 +380,8 @@ public:
     int                 volume_idx() const { return this->composite_id.volume_id; }
     int                 instance_idx() const { return this->composite_id.instance_id; }
 
-#if ENABLE_MODELVOLUME_TRANSFORM
-    Transform3d world_matrix() const;
-#else
-    const Transform3f&   world_matrix() const;
-#endif // ENABLE_MODELVOLUME_TRANSFORM
+    Transform3d         world_matrix() const;
+
     const BoundingBoxf3& transformed_bounding_box() const;
     const BoundingBoxf3& transformed_convex_hull_bounding_box() const;
 
@@ -449,58 +390,19 @@ public:
 
     void                set_range(coordf_t low, coordf_t high);
     void                render() const;
-    void                render_using_layer_height() const;
     void                render_VBOs(int color_id, int detection_id, int worldmatrix_id) const;
     void                render_legacy() const;
 
     void                finalize_geometry(bool use_VBOs) { this->indexed_vertex_array.finalize_geometry(use_VBOs); }
     void                release_geometry() { this->indexed_vertex_array.release_geometry(); }
 
-    /************************************************ Layer height texture ****************************************************/
-    std::shared_ptr<LayersTexture>  layer_height_texture;
-    // Data to render this volume using the layer height texture
-    LayerHeightTextureData layer_height_texture_data;
-
-    bool                has_layer_height_texture() const 
-        { return this->layer_height_texture.get() != nullptr; }
-    size_t              layer_height_texture_width() const 
-        { return (this->layer_height_texture.get() == nullptr) ? 0 : this->layer_height_texture->width; }
-    size_t              layer_height_texture_height() const 
-        { return (this->layer_height_texture.get() == nullptr) ? 0 : this->layer_height_texture->height; }
-    size_t              layer_height_texture_cells() const 
-        { return (this->layer_height_texture.get() == nullptr) ? 0 : this->layer_height_texture->cells; }
-    void*               layer_height_texture_data_ptr_level0() const {
-        return (layer_height_texture.get() == nullptr) ? 0 :
-            (void*)layer_height_texture->data.data();
-    }
-    void*               layer_height_texture_data_ptr_level1() const {
-        return (layer_height_texture.get() == nullptr) ? 0 :
-            (void*)(layer_height_texture->data.data() + layer_height_texture->width * layer_height_texture->height * 4);
-    }
-    double              layer_height_texture_z_to_row_id() const;
-    void                generate_layer_height_texture(const PrintObject *print_object, bool force);
-
-    void set_layer_height_texture_data(unsigned int texture_id, unsigned int shader_id, const PrintObject* print_object, float z_cursor_relative, float edit_band_width)
-    {
-        layer_height_texture_data.texture_id = texture_id;
-        layer_height_texture_data.shader_id = shader_id;
-        layer_height_texture_data.print_object = print_object;
-        layer_height_texture_data.z_cursor_relative = z_cursor_relative;
-        layer_height_texture_data.edit_band_width = edit_band_width;
-    }
-
-    void reset_layer_height_texture_data() { layer_height_texture_data.reset(); }
-
-#if ENABLE_MODELVOLUME_TRANSFORM
-    void set_bounding_boxes_as_dirty() { m_transformed_bounding_box_dirty = true; m_transformed_convex_hull_bounding_box_dirty = true; }
-#endif // ENABLE_MODELVOLUME_TRANSFORM
+    void                set_bounding_boxes_as_dirty() { m_transformed_bounding_box_dirty = true; m_transformed_convex_hull_bounding_box_dirty = true; }
 };
 
 typedef std::vector<GLVolume*> GLVolumePtrs;
 
 class GLVolumeCollection
 {
-#if ENABLE_IMPROVED_TRANSPARENT_VOLUMES_RENDERING
 public:
     enum ERenderType : unsigned char
     {
@@ -510,7 +412,6 @@ public:
     };
 
 private:
-#endif // ENABLE_IMPROVED_TRANSPARENT_VOLUMES_RENDERING
     // min and max vertex of the print box volume
     float print_box_min[3];
     float print_box_max[3];
@@ -533,7 +434,6 @@ public:
 
     int load_object_volume(
         const ModelObject       *model_object,
-        std::shared_ptr<LayersTexture> &layer_height_texture,
         int                      obj_idx,
         int                      volume_idx,
         int                      instance_idx,
@@ -555,13 +455,8 @@ public:
         int obj_idx, float pos_x, float pos_y, float width, float depth, float height, float rotation_angle, bool use_VBOs, bool size_unknown, float brim_width);
 
     // Render the volumes by OpenGL.
-#if ENABLE_IMPROVED_TRANSPARENT_VOLUMES_RENDERING
-    void render_VBOs(ERenderType type, bool disable_cullface) const;
+	void render_VBOs(ERenderType type, bool disable_cullface, std::function<bool(const GLVolume&)> filter_func = std::function<bool(const GLVolume&)>()) const;
     void render_legacy(ERenderType type, bool disable_cullface) const;
-#else
-    void render_VBOs() const;
-    void render_legacy() const;
-#endif // ENABLE_IMPROVED_TRANSPARENT_VOLUMES_RENDERING
 
     // Finalize the initialization of the geometry & indices,
     // upload the geometry and indices to OpenGL VBO objects
@@ -598,19 +493,25 @@ private:
     GLVolumeCollection& operator=(const GLVolumeCollection &);
 };
 
-#if ENABLE_SIDEBAR_VISUAL_HINTS
 class GLModel
 {
 protected:
     GLVolume m_volume;
     bool m_useVBOs;
+#if ENABLE_PRINT_BED_MODELS
+    std::string m_filename;
+#endif // ENABLE_PRINT_BED_MODELS
 
 public:
     GLModel();
     virtual ~GLModel();
 
     bool init(bool useVBOs) { return on_init(useVBOs); }
+#if ENABLE_PRINT_BED_MODELS
+    bool init_from_file(const std::string& filename, bool useVBOs) { return on_init_from_file(filename, useVBOs); }
 
+    void center_around(const Vec3d& center) { m_volume.set_volume_offset(center - m_volume.bounding_box.center()); }
+#endif // ENABLE_PRINT_BED_MODELS
     void set_color(const float* color, unsigned int size);
 
     const Vec3d& get_offset() const;
@@ -620,10 +521,22 @@ public:
     const Vec3d& get_scale() const;
     void set_scale(const Vec3d& scale);
 
+#if ENABLE_PRINT_BED_MODELS
+    const std::string& get_filename() const { return m_filename; }
+    const BoundingBoxf3& get_bounding_box() const { return m_volume.bounding_box; }
+
+    void reset();
+#endif // ENABLE_PRINT_BED_MODELS
+
     void render() const; 
 
 protected:
+#if ENABLE_PRINT_BED_MODELS
+    virtual bool on_init(bool useVBOs) { return false; }
+    virtual bool on_init_from_file(const std::string& filename, bool useVBOs) { return false; }
+#else
     virtual bool on_init(bool useVBOs) = 0;
+#endif // ENABLE_PRINT_BED_MODELS
 
 private:
     void render_VBOs() const;
@@ -646,7 +559,14 @@ public:
 protected:
     virtual bool on_init(bool useVBOs);
 };
-#endif // ENABLE_SIDEBAR_VISUAL_HINTS
+
+#if ENABLE_PRINT_BED_MODELS
+class GLBed : public GLModel
+{
+protected:
+    virtual bool on_init_from_file(const std::string& filename, bool useVBOs);
+};
+#endif // ENABLE_PRINT_BED_MODELS
 
 class _3DScene
 {
