@@ -5759,17 +5759,9 @@ void GLCanvas3D::do_move()
             if (model_object != nullptr)
             {
                 if (selection_mode == Selection::Instance)
-                {
-                    m_model->undo->begin(model_object->instances[instance_idx]);
                     model_object->instances[instance_idx]->set_offset(v->get_instance_offset());
-                    m_model->undo->end();
-                }
                 else if (selection_mode == Selection::Volume)
-                {
-                    m_model->undo->begin(model_object->volumes[volume_idx]);
                     model_object->volumes[volume_idx]->set_offset(v->get_volume_offset());
-                    m_model->undo->end();
-                }
                 object_moved = true;
                 model_object->invalidate_bounding_box();
             }
@@ -5824,17 +5816,13 @@ void GLCanvas3D::do_rotate(bool flattenning)
         {
             if (selection_mode == Selection::Instance)
             {
-                m_model->undo->begin(model_object->instances[instance_idx]);
                 model_object->instances[instance_idx]->set_rotation(v->get_instance_rotation());
                 model_object->instances[instance_idx]->set_offset(v->get_instance_offset());
-                m_model->undo->end();
             }
             else if (selection_mode == Selection::Volume)
             {
-                m_model->undo->begin(model_object->volumes[volume_idx]);
                 model_object->volumes[volume_idx]->set_rotation(v->get_volume_rotation());
                 model_object->volumes[volume_idx]->set_offset(v->get_volume_offset());
-                m_model->undo->end();
             }
             model_object->invalidate_bounding_box();
         }
@@ -5875,26 +5863,21 @@ void GLCanvas3D::do_scale()
 
         done.insert(std::pair<int, int>(object_idx, instance_idx));
 
-        // Rotate instances/volumes
+        // Scale instances/volumes
         ModelObject* model_object = m_model->objects[object_idx];
         if (model_object != nullptr)
         {
             if (selection_mode == Selection::Instance)
             {
-                m_model->undo->begin(model_object->instances[instance_idx]);
                 model_object->instances[instance_idx]->set_scaling_factor(v->get_instance_scaling_factor());
                 model_object->instances[instance_idx]->set_offset(v->get_instance_offset());
-                m_model->undo->end();
             }
             else if (selection_mode == Selection::Volume)
             {
-                m_model->undo->begin(model_object->instances[instance_idx]);
+                m_model->undo->begin_batch("Scale");
                 model_object->instances[instance_idx]->set_offset(v->get_instance_offset());
-                m_model->undo->end();
-                m_model->undo->begin(model_object->volumes[volume_idx]);
                 model_object->volumes[volume_idx]->set_scaling_factor(v->get_volume_scaling_factor());
                 model_object->volumes[volume_idx]->set_offset(v->get_volume_offset());
-                m_model->undo->end();
             }
             model_object->invalidate_bounding_box();
         }

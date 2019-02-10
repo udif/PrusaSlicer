@@ -769,49 +769,49 @@ ModelInstance* ModelObject::add_instance(int idx)
     if (idx == -1)
         idx = instances.size();
 
-    this->get_model()->undo->begin(this);
+    //this->get_model()->undo->begin(this);
 
     ModelInstance* i = new ModelInstance(this);
     this->instances.insert(instances.begin() + idx, i);
     //this->instances.push_back(i);
     this->invalidate_bounding_box();
 
-    this->get_model()->undo->end();
+    //this->get_model()->undo->end();
 
     return i;
 }
 
 ModelInstance* ModelObject::add_instance(const ModelInstance &other)
 {
-    this->get_model()->undo->begin(this);
+    //this->get_model()->undo->begin(this);
     ModelInstance* i = new ModelInstance(this, other);
     this->instances.push_back(i);
     this->invalidate_bounding_box();
-    this->get_model()->undo->end();
+    //this->get_model()->undo->end();
     return i;
 }
 
 ModelInstance* ModelObject::add_instance(const Vec3d &offset, const Vec3d &scaling_factor, const Vec3d &rotation, const Vec3d &mirror)
 {
-    this->get_model()->undo->begin_batch("Add instance");
+    //this->get_model()->undo->begin_batch("Add instance");
     auto *instance = add_instance();
-    this->get_model()->undo->begin(instance);
+    //this->get_model()->undo->begin(instance);
     instance->set_offset(offset);
     instance->set_scaling_factor(scaling_factor);
     instance->set_rotation(rotation);
     instance->set_mirror(mirror);
-    this->get_model()->undo->end();
-    this->get_model()->undo->end_batch();
+    //this->get_model()->undo->end();
+    //this->get_model()->undo->end_batch();
     return instance;
 }
 
 void ModelObject::delete_instance(size_t idx)
 {
     ModelInstancePtrs::iterator i = this->instances.begin() + idx;
-    this->get_model()->undo->begin(instances[idx]);
+    //this->get_model()->undo->begin(instances[idx]);
     delete *i;
     this->instances.erase(i);
-    this->get_model()->undo->end();
+    //this->get_model()->undo->end();
     this->invalidate_bounding_box();
 }
 
@@ -823,10 +823,10 @@ void ModelObject::delete_last_instance()
 void ModelObject::clear_instances()
 {
     while (!instances.empty()) {
-        get_model()->undo->begin(instances.back());
+        //get_model()->undo->begin(instances.back());
         delete instances.back();
         instances.pop_back();
-        get_model()->undo->end();
+        //get_model()->undo->end();
     }
 
     this->invalidate_bounding_box();
@@ -1463,9 +1463,7 @@ void ModelVolume::set_material(t_model_material_id material_id, const ModelMater
 
 void ModelVolume::set_type(const Type t)
 {
-    get_object()->get_model()->undo->begin(this);
-    m_type = t;
-    get_object()->get_model()->undo->end();
+    get_object()->get_model()->undo->change_volume_type(this, t);
 }
 
 // Extract the current extruder ID based on this ModelVolume's config and the parent ModelObject's config.
@@ -1629,6 +1627,16 @@ void ModelVolume::scale_geometry(const Vec3d& versor)
 void ModelInstance::transform_mesh(TriangleMesh* mesh, bool dont_translate) const
 {
     mesh->transform(get_matrix(dont_translate));
+}
+
+void ModelInstance::set_transformation(const Geometry::Transformation& transformation)
+{
+    get_object()->get_model()->undo->change_instance_transformation(this, transformation);
+}
+
+void ModelVolume::set_transformation(const Geometry::Transformation& transformation)
+{
+    get_object()->get_model()->undo->change_volume_transformation(this, transformation);
 }
 
 BoundingBoxf3 ModelInstance::transform_mesh_bounding_box(const TriangleMesh& mesh, bool dont_translate) const

@@ -7,7 +7,7 @@ namespace Slic3r {
     
 static int get_idx(ModelInstance* inst)
 {
-    ModelObject* mo = inst->get_object();
+    const ModelObject* mo = inst->get_object();
     int i=0;
     for (i=0; i<(int)mo->instances.size(); ++i)
         if (mo->instances[i] == inst)
@@ -17,7 +17,7 @@ static int get_idx(ModelInstance* inst)
 
 static int get_idx(ModelObject* mo)
 {
-    Model* model = mo->get_model();
+    const Model* model = mo->get_model();
     int i=0;
     for (i=0; i<(int)model->objects.size(); ++i)
         if (model->objects[i] == mo)
@@ -27,7 +27,7 @@ static int get_idx(ModelObject* mo)
 
 static int get_idx(ModelVolume* vol)
 {
-    ModelObject* mo = vol->get_object();
+    const ModelObject* mo = vol->get_object();
     int i=0;
     for (i=0; i<(int)mo->volumes.size(); ++i)
         if (mo->volumes[i] == vol)
@@ -35,30 +35,127 @@ static int get_idx(ModelVolume* vol)
     return -1;
 }
 
-
-UndoRedo::Change::Change(ModelInstance* inst, const Geometry::Transformation& old_trans, const Geometry::Transformation& new_trans)
+static void reload_object_list()
 {
-    m_model = inst->get_object()->get_model();
-    m_mo_idx = get_idx(inst->get_object());
-    m_mi_idx = get_idx(inst);
-    m_old_trans = old_trans;
-    m_new_trans = new_trans;
+    GUI::wxGetApp().obj_list()->delete_all_objects_from_list();
+    for (size_t idx=0; idx<GUI::wxGetApp().model_objects()->size(); ++ idx)
+        GUI::wxGetApp().obj_list()->add_object_to_list(idx);
 }
 
-UndoRedo::Change::Change(ModelVolume* vol, const Geometry::Transformation& old_trans, const Geometry::Transformation& new_trans,
-                         const std::string old_name, const std::string new_name, ModelVolume::Type old_type, ModelVolume::Type new_type)
+////////////////////////////////////////////////////////////////
+
+void UndoRedo::action(Command* command)
 {
-    m_model = vol->get_object()->get_model();
-    m_mo_idx = get_idx(vol->get_object());
-    m_mv_idx = get_idx(vol);
-    m_old_trans = old_trans;
-    m_new_trans = new_trans;
-    m_old_name = old_name;
-    m_new_name = new_name;
-    m_old_type = old_type;
-    m_new_type = new_type;
+    command->redo();  // don't forget to actually perform the action
+    push(command);    // and push the command onto the undo/redo stack
 }
 
+////////////////////////////////////////////////////////////////
+
+UndoRedo::ChangeInstanceTransformation::ChangeInstanceTransformation(Model* model, ModelInstance* inst, const Geometry::Transformation& transformation)
+: ChangeInstanceTransformation(model, get_idx(inst->get_object()), get_idx(inst), transformation) {}
+
+UndoRedo::ChangeInstanceTransformation::ChangeInstanceTransformation(Model* model, int mo_idx, int mi_idx, const Geometry::Transformation& transformation)
+: m_mo_idx(mo_idx), m_mi_idx(mi_idx), m_new_transformation(transformation)
+{
+    m_model = model;
+    m_description = "Change instance transformation";
+    try {
+    m_old_transformation = m_model->objects.at(m_mo_idx)->instances.at(mi_idx)->get_transformation();
+    } catch (...) { std::cout << "!!!" << std::endl; m_old_transformation = Geometry::Transformation(); }
+}
+
+void UndoRedo::ChangeInstanceTransformation::undo()
+{
+    m_model->objects[m_mo_idx]->instances[m_mi_idx]->m_transformation = m_old_transformation;
+}
+
+void UndoRedo::ChangeInstanceTransformation::redo()
+{
+    m_model->objects[m_mo_idx]->instances[m_mi_idx]->m_transformation = m_new_transformation;
+}
+
+////////////////////////////////////////////////////////////////
+
+UndoRedo::ChangeVolumeTransformation::ChangeVolumeTransformation(Model* model, ModelVolume* vol, const Geometry::Transformation& transformation)
+: ChangeVolumeTransformation(model, get_idx(vol->get_object()), get_idx(vol), transformation) {}
+
+UndoRedo::ChangeVolumeTransformation::ChangeVolumeTransformation(Model* model, int mo_idx, int mv_idx, const Geometry::Transformation& transformation)
+: m_mo_idx(mo_idx), m_mv_idx(mv_idx), m_new_transformation(transformation)
+{
+    m_model = model;
+    m_description = "Change volume transformation";
+    m_old_transformation = m_model->objects[m_mo_idx]->volumes[mv_idx]->get_transformation();
+}
+
+void UndoRedo::ChangeVolumeTransformation::undo()
+{
+    m_model->objects[m_mo_idx]->volumes[m_mv_idx]->m_transformation = m_old_transformation;
+}
+
+void UndoRedo::ChangeVolumeTransformation::redo()
+{
+    m_model->objects[m_mo_idx]->volumes[m_mv_idx]->m_transformation = m_new_transformation;
+}
+
+////////////////////////////////////////////////////////////////
+
+UndoRedo::ChangeVolumeType::ChangeVolumeType(Model* model, ModelVolume* vol, ModelVolume::Type new_type)
+: ChangeVolumeType(model, get_idx(vol->get_object()), get_idx(vol), new_type) {}
+
+UndoRedo::ChangeVolumeType::ChangeVolumeType(Model* model, int mo_idx, int mv_idx, ModelVolume::Type new_type)
+: m_mo_idx(mo_idx), m_mv_idx(mv_idx), m_new_type(new_type)
+{
+    m_model = model;
+    m_description = "Change volume type";
+    m_old_type = m_model->objects[m_mo_idx]->volumes[mv_idx]->type();
+}
+
+void UndoRedo::ChangeVolumeType::undo()
+{
+    m_model->objects[m_mo_idx]->volumes[m_mv_idx]->m_type = m_old_type;
+}
+
+void UndoRedo::ChangeVolumeType::redo()
+{
+    m_model->objects[m_mo_idx]->volumes[m_mv_idx]->m_type = m_new_type;
+}
+
+////////////////////////////////////////////////////////////////
+
+UndoRedo::ChangeName::ChangeName(Model* model, int mo_idx, int mv_idx, const std::string& new_name)
+: m_mo_idx(mo_idx), m_mv_idx(mv_idx), m_new_name(new_name)
+{
+    m_model = model;
+    m_description = "Change volume name";
+    m_old_name = mv_idx != -1 ? m_model->objects[m_mo_idx]->volumes[mv_idx]->name :  m_model->objects[m_mo_idx]->name;
+}
+
+void UndoRedo::ChangeName::undo()
+{
+    if (m_mv_idx >= 0)
+        m_model->objects[m_mo_idx]->volumes[m_mv_idx]->name = m_old_name;
+    else
+        m_model->objects[m_mo_idx]->name = m_old_name;
+
+    reload_object_list();
+}
+
+void UndoRedo::ChangeName::redo()
+{
+    if (m_mv_idx >= 0)
+        m_model->objects[m_mo_idx]->volumes[m_mv_idx]->name = m_new_name;
+    else
+        m_model->objects[m_mo_idx]->name = m_new_name;
+
+    reload_object_list();
+}
+
+////////////////////////////////////////////////////////////////
+
+
+
+/*
 void UndoRedo::Change::redo()
 {
     if (m_mi_idx != -1)
@@ -129,7 +226,7 @@ void UndoRedo::RemoveInstance::undo()
     m_model->objects[m_mo_idx]->add_instance(m_mi_idx)->set_transformation(m_trans);
     GUI::wxGetApp().obj_list()->increase_object_instances(m_mo_idx, 1);
 }
-
+*/
 ////////////////////////////////////////////////////////////////
 
 void UndoRedo::begin_batch(const std::string& desc)
@@ -148,7 +245,7 @@ void UndoRedo::end_batch() {
     m_batch_start = false;
     m_batch_running = false;
 }
-
+/*
 void UndoRedo::begin(ModelInstance* inst)
 {
     if (working())
@@ -245,17 +342,18 @@ void UndoRedo::end()
 
     m_current_command_type = CommandType::None;
 }
+*/
 
 //////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////
 
 void UndoRedo::push(Command* command) {
     if (m_batch_running)
-        command->bound_to_previous = true;
+        command->m_bound_to_previous = true;
     if (m_batch_start)
         m_batch_running = true;
     if (m_batch_running)
-        command->description = m_batch_desc;
+        command->m_description = m_batch_desc;
 
      m_stack.resize(m_index); // clears the redo part of the stack
      m_stack.emplace_back(command);
@@ -267,32 +365,24 @@ void UndoRedo::push(Command* command) {
 
 void UndoRedo::undo()
 {
-    m_lock = true;
     do {
         if (!anything_to_undo())
             return;
 
         --m_index;
         m_stack[m_index]->undo();
-    } while (m_stack[m_index]->bound_to_previous);
-    m_lock = false;
+    } while (m_stack[m_index]->m_bound_to_previous);
 }
 
 void UndoRedo::redo()
 {
-    m_lock = true;
     do {
         if (!anything_to_redo())
             return;
 
         m_stack[m_index]->redo();
         ++m_index;
-    } while (m_index < m_stack.size() && m_stack[m_index]->bound_to_previous);
-    m_lock = false;
-}
-
-bool UndoRedo::working() const {
-    return m_lock;
+    } while (m_index < m_stack.size() && m_stack[m_index]->m_bound_to_previous);
 }
 
 } // namespace Slic3r

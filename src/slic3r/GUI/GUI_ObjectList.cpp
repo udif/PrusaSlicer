@@ -324,15 +324,13 @@ void ObjectList::update_name_in_model(const wxDataViewItem& item) const
     if (obj_idx < 0) return;
 
     if (m_objects_model->GetParent(item) == wxDataViewItem(0)) {
-        (*m_objects)[obj_idx]->name = m_objects_model->GetName(item).ToUTF8().data();
+        (*m_objects)[obj_idx]->get_model()->undo->change_name(obj_idx, -1, m_objects_model->GetName(item).ToUTF8().data());
         return;
     }
 
     const int volume_id = m_objects_model->GetVolumeIdByItem(item);
     if (volume_id < 0) return;
-    m_objects->front()->get_model()->undo->begin((*m_objects)[obj_idx]->volumes[volume_id]);
-    (*m_objects)[obj_idx]->volumes[volume_id]->name = m_objects_model->GetName(item).ToUTF8().data();
-    m_objects->front()->get_model()->undo->end();
+    (*m_objects)[obj_idx]->get_model()->undo->change_name(obj_idx, volume_id, m_objects_model->GetName(item).ToUTF8().data());
 }
 
 void ObjectList::init_icons()
@@ -1989,11 +1987,13 @@ void ObjectList::change_part_type()
         return;
 
     const auto item = GetSelection();
+    volume->get_object()->get_model()->undo->begin_batch("Change volume type");
     volume->set_type(static_cast<ModelVolume::Type>(new_type));
     m_objects_model->SetVolumeType(item, new_type);
 
     m_parts_changed = true;
     parts_changed(get_selected_obj_idx());
+    volume->get_object()->get_model()->undo->end_batch();
 
     // Update settings showing, if we have it
     //(we show additional settings for Part and Modifier and hide it for Support Blocker/Enforcer)

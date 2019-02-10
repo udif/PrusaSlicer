@@ -312,6 +312,10 @@ public:
         SUPPORT_BLOCKER,
     };
 
+    Geometry::Transformation m_transformation;
+    // Is it an object to be printed, or a modifier volume?
+    Type m_type;
+
     // A parent object owning this modifier volume.
     ModelObject*        get_object() const { return this->object; };
     Type                type() const { return m_type; }
@@ -358,31 +362,31 @@ public:
     static std::string  type_to_string(const Type t);
 
     const Geometry::Transformation& get_transformation() const { return m_transformation; }
-    void set_transformation(const Geometry::Transformation& transformation) { m_transformation = transformation; }
+    void set_transformation(const Geometry::Transformation& transformation);
 
-    const Vec3d& get_offset() const { return m_transformation.get_offset(); }
-    double get_offset(Axis axis) const { return m_transformation.get_offset(axis); }
+    const Vec3d& get_offset() const                 { return m_transformation.get_offset(); }
+    double get_offset(Axis axis) const              { return m_transformation.get_offset(axis); }
 
-    void set_offset(const Vec3d& offset) { m_transformation.set_offset(offset); }
-    void set_offset(Axis axis, double offset) { m_transformation.set_offset(axis, offset); }
+    void set_offset(const Vec3d& offset)            { auto t{m_transformation}; t.set_offset(offset); set_transformation(t); }
+    void set_offset(Axis axis, double offset)       { auto t{m_transformation}; t.set_offset(axis, offset); set_transformation(t); }
 
-    const Vec3d& get_rotation() const { return m_transformation.get_rotation(); }
-    double get_rotation(Axis axis) const { return m_transformation.get_rotation(axis); }
+    const Vec3d& get_rotation() const               { return m_transformation.get_rotation(); }
+    double get_rotation(Axis axis) const            { return m_transformation.get_rotation(axis); }
 
-    void set_rotation(const Vec3d& rotation) { m_transformation.set_rotation(rotation); }
-    void set_rotation(Axis axis, double rotation) { m_transformation.set_rotation(axis, rotation); }
+    void set_rotation(const Vec3d& rotation)        { auto t{m_transformation}; t.set_rotation(rotation); set_transformation(t); }
+    void set_rotation(Axis axis, double rotation)   { auto t{m_transformation}; t.set_rotation(axis, rotation); set_transformation(t); }
 
-    Vec3d get_scaling_factor() const { return m_transformation.get_scaling_factor(); }
-    double get_scaling_factor(Axis axis) const { return m_transformation.get_scaling_factor(axis); }
+    Vec3d get_scaling_factor() const                { return m_transformation.get_scaling_factor(); }
+    double get_scaling_factor(Axis axis) const      { return m_transformation.get_scaling_factor(axis); }
 
-    void set_scaling_factor(const Vec3d& scaling_factor) { m_transformation.set_scaling_factor(scaling_factor); }
-    void set_scaling_factor(Axis axis, double scaling_factor) { m_transformation.set_scaling_factor(axis, scaling_factor); }
+    void set_scaling_factor(const Vec3d& scaling_factor)        { auto t{m_transformation}; t.set_scaling_factor(scaling_factor); set_transformation(t); }
+    void set_scaling_factor(Axis axis, double scaling_factor)   { auto t{m_transformation}; t.set_scaling_factor(axis, scaling_factor); set_transformation(t); }
 
-    const Vec3d& get_mirror() const { return m_transformation.get_mirror(); }
-    double get_mirror(Axis axis) const { return m_transformation.get_mirror(axis); }
+    const Vec3d& get_mirror() const                 { return m_transformation.get_mirror(); }
+    double get_mirror(Axis axis) const              { return m_transformation.get_mirror(axis); }
 
-    void set_mirror(const Vec3d& mirror) { m_transformation.set_mirror(mirror); }
-    void set_mirror(Axis axis, double mirror) { m_transformation.set_mirror(axis, mirror); }
+    void set_mirror(const Vec3d& mirror)            { auto t{m_transformation}; t.set_mirror(mirror); set_transformation(t); }
+    void set_mirror(Axis axis, double mirror)       { auto t{m_transformation}; t.set_mirror(axis, mirror); set_transformation(t); }
 
     const Transform3d& get_matrix(bool dont_translate = false, bool dont_rotate = false, bool dont_scale = false, bool dont_mirror = false) const { return m_transformation.get_matrix(dont_translate, dont_rotate, dont_scale, dont_mirror); }
 
@@ -399,12 +403,10 @@ protected:
 private:
     // Parent object owning this ModelVolume.
     ModelObject*            object;
-    // Is it an object to be printed, or a modifier volume?
-    Type                    m_type;
+
     t_model_material_id     m_material_id;
     // The convex hull of this model's mesh.
     TriangleMesh             m_convex_hull;
-    Geometry::Transformation m_transformation;
 
     // flag to optimize the checking if the volume is splittable
     //     -1   ->   is unknown value (before first cheking)
@@ -452,41 +454,39 @@ public:
         Num_BedStates
     };
 
-private:
     Geometry::Transformation m_transformation;
 
-public:
     // flag showing the position of this instance with respect to the print volume (set by Print::validate() using ModelObject::check_instances_print_volume_state())
     EPrintVolumeState print_volume_state;
 
     ModelObject* get_object() const { return this->object; }
 
     const Geometry::Transformation& get_transformation() const { return m_transformation; }
-    void set_transformation(const Geometry::Transformation& transformation) { m_transformation = transformation; }
+    void set_transformation(const Geometry::Transformation& transformation);
 
     const Vec3d& get_offset() const { return m_transformation.get_offset(); }
     double get_offset(Axis axis) const { return m_transformation.get_offset(axis); }
 
-    void set_offset(const Vec3d& offset) { m_transformation.set_offset(offset); }
-    void set_offset(Axis axis, double offset) { m_transformation.set_offset(axis, offset); }
+    void set_offset(const Vec3d& offset) { auto t{m_transformation}; t.set_offset(offset);  set_transformation(t); }
+    void set_offset(Axis axis, double offset) { auto t{m_transformation}; t.set_offset(axis, offset);  set_transformation(t); }
 
     const Vec3d& get_rotation() const { return m_transformation.get_rotation(); }
     double get_rotation(Axis axis) const { return m_transformation.get_rotation(axis); }
 
-    void set_rotation(const Vec3d& rotation) { m_transformation.set_rotation(rotation); }
-    void set_rotation(Axis axis, double rotation) { m_transformation.set_rotation(axis, rotation); }
+    void set_rotation(const Vec3d& rotation) { auto t{m_transformation}; t.set_rotation(rotation);  set_transformation(t); }
+    void set_rotation(Axis axis, double rotation) { auto t{m_transformation}; t.set_rotation(axis, rotation);  set_transformation(t); }
 
     const Vec3d& get_scaling_factor() const { return m_transformation.get_scaling_factor(); }
     double get_scaling_factor(Axis axis) const { return m_transformation.get_scaling_factor(axis); }
 
-    void set_scaling_factor(const Vec3d& scaling_factor) { m_transformation.set_scaling_factor(scaling_factor); }
-    void set_scaling_factor(Axis axis, double scaling_factor) { m_transformation.set_scaling_factor(axis, scaling_factor); }
+    void set_scaling_factor(const Vec3d& scaling_factor) { auto t{m_transformation}; t.set_scaling_factor(scaling_factor);  set_transformation(t); }
+    void set_scaling_factor(Axis axis, double scaling_factor) { auto t{m_transformation}; t.set_scaling_factor(axis, scaling_factor);  set_transformation(t); }
 
     const Vec3d& get_mirror() const { return m_transformation.get_mirror(); }
     double get_mirror(Axis axis) const { return m_transformation.get_mirror(axis); }
 
-    void set_mirror(const Vec3d& mirror) { m_transformation.set_mirror(mirror); }
-    void set_mirror(Axis axis, double mirror) { m_transformation.set_mirror(axis, mirror); }
+    void set_mirror(const Vec3d& mirror) { auto t{m_transformation}; t.set_mirror(mirror);  set_transformation(t);  }
+    void set_mirror(Axis axis, double mirror) { auto t{m_transformation}; t.set_mirror(axis, mirror); set_transformation(t); }
 
     // To be called on an external mesh
     void transform_mesh(TriangleMesh* mesh, bool dont_translate = false) const;

@@ -649,10 +649,8 @@ void applyResult(
 
         // write the transformation data into the model instance
 
-        undo->begin(inst_ptr);
         inst_ptr->set_rotation(Z, rot);
         inst_ptr->set_offset(foff);
-        undo->end();
     }
     undo->end_batch();
 }
