@@ -11,9 +11,10 @@
 #include <float.h>
 
 #include <boost/algorithm/string/predicate.hpp>
-#include <boost/filesystem.hpp>
-#include <boost/nowide/iostream.hpp>
 #include <boost/algorithm/string/replace.hpp>
+#include <boost/filesystem.hpp>
+#include <boost/log/trivial.hpp>
+#include <boost/nowide/iostream.hpp>
 
 #include "SVG.hpp"
 #include <Eigen/Dense>
@@ -1147,6 +1148,8 @@ ModelObjectPtrs ModelObject::cut(size_t instance, coordf_t z, bool keep_upper, b
 {
     if (!keep_upper && !keep_lower) { return {}; }
 
+    BOOST_LOG_TRIVIAL(trace) << "ModelObject::cut - start";
+
     // Clone the object to duplicate instances, materials etc.
     ModelObject* upper = keep_upper ? ModelObject::new_clone(*this) : nullptr;
     ModelObject* lower = keep_lower ? ModelObject::new_clone(*this) : nullptr;
@@ -1280,6 +1283,8 @@ ModelObjectPtrs ModelObject::cut(size_t instance, coordf_t z, bool keep_upper, b
 
         res.push_back(lower);
     }
+
+    BOOST_LOG_TRIVIAL(trace) << "ModelObject::cut - end";
 
     return res;
 }
@@ -1472,7 +1477,7 @@ int ModelVolume::extruder_id() const
     int extruder_id = -1;
     if (this->is_model_part()) {
         const ConfigOption *opt = this->config.option("extruder");
-        if (opt == nullptr)
+        if ((opt == nullptr) || (opt->getInt() == 0))
             opt = this->object->config.option("extruder");
         extruder_id = (opt == nullptr) ? 0 : opt->getInt();
     }

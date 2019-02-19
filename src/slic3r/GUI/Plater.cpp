@@ -12,7 +12,6 @@
 
 #include <wx/sizer.h>
 #include <wx/stattext.h>
-#include <wx/notebook.h>
 #include <wx/button.h>
 #include <wx/bmpcbox.h>
 #include <wx/statbox.h>
@@ -964,6 +963,7 @@ struct Plater::priv
     std::atomic<bool>           arranging;
     std::atomic<bool>           rotoptimizing;
     bool                        delayed_scene_refresh;
+    std::string                 delayed_error_message;
 
     wxTimer                     background_process_timer;
 
@@ -1097,7 +1097,7 @@ Plater::priv::priv(Plater *q, MainFrame *main_frame)
     : q(q)
     , main_frame(main_frame)
     , config(Slic3r::DynamicPrintConfig::new_from_defaults_keys({
-        "bed_shape", "complete_objects", "extruder_clearance_radius", "skirts", "skirt_distance",
+        "bed_shape", "complete_objects", "duplicate_distance", "extruder_clearance_radius", "skirts", "skirt_distance",
         "brim_width", "variable_layer_height", "serial_port", "serial_speed", "host_type", "print_host",
         "printhost_apikey", "printhost_cafile", "nozzle_diameter", "single_extruder_multi_material",
         "wipe_tower", "wipe_tower_x", "wipe_tower_y", "wipe_tower_width", "wipe_tower_rotation_angle",
@@ -1781,8 +1781,11 @@ void Plater::priv::arrange()
     // FIXME: I don't know how to obtain the minimum distance, it depends
     // on printer technology. I guess the following should work but it crashes.
     double dist = 6; //PrintConfig::min_object_distance(config);
+    if(printer_technology == ptFFF) {
+        dist = PrintConfig::min_object_distance(config);
+    }
 
-    auto min_obj_distance = static_cast<coord_t>(dist/SCALING_FACTOR);
+    auto min_obj_distance = coord_t(dist/SCALING_FACTOR);
 
     const auto *bed_shape_opt = config->opt<ConfigOptionPoints>("bed_shape");
 
@@ -1893,6 +1896,7 @@ void Plater::priv::split_object()
         return;
     }
 
+    wxBusyCursor wait;
     ModelObjectPtrs new_objects;
     current_model_object->split(&new_objects);
     if (new_objects.size() == 1)
@@ -1969,6 +1973,8 @@ unsigned int Plater::priv::update_background_process(bool force_validation)
     this->background_process_timer.Stop();
     // Update the "out of print bed" state of ModelInstances.
     this->update_print_volume_state();
+    // The delayed error message is no more valid.
+    this->delayed_error_message.clear();
     // Apply new config to the possibly running background task.
     bool               was_running = this->background_process.running();
     Print::ApplyStatus invalidated = this->background_process.apply(this->q->model(), wxGetApp().preset_bundle->full_config());
@@ -2007,8 +2013,18 @@ unsigned int Plater::priv::update_background_process(bool force_validation)
                 return_state |= UPDATE_BACKGROUND_PROCESS_RESTART;
         } else {
             // The print is not valid.
-            // The error returned from the Print needs to be translated into the local language.
-            GUI::show_error(this->q, _(err));
+            // Only show the error message immediately, if the top level parent of this window is active.
+            auto p = dynamic_cast<wxWindow*>(this->q);
+            while (p->GetParent())
+                p = p->GetParent();
+            auto *top_level_wnd = dynamic_cast<wxTopLevelWindow*>(p);
+            if (top_level_wnd && top_level_wnd->IsActive()) {
+                // The error returned from the Print needs to be translated into the local language.
+                GUI::show_error(this->q, _(err));
+            } else {
+                // Show the error message once the main window gets activated.
+                this->delayed_error_message = _(err);
+            }
             return_state |= UPDATE_BACKGROUND_PROCESS_INVALID;
         }
     }
@@ -2859,6 +2875,7 @@ void Plater::cut(size_t obj_idx, size_t instance_idx, coordf_t z, bool keep_uppe
         return;
     }
 
+    wxBusyCursor wait;
     const auto new_objects = object->cut(instance_idx, z, keep_upper, keep_lower, rotate_lower);
 
     remove(obj_idx);
@@ -2942,6 +2959,7 @@ void Plater::export_amf()
     const std::string path_u8 = into_u8(path);
 
 	DynamicPrintConfig cfg = wxGetApp().preset_bundle->full_config_secure();
+    wxBusyCursor wait;
 	if (Slic3r::store_amf(path_u8.c_str(), &p->model, dialog->get_checkbox_value() ? &cfg : nullptr)) {
         // Success
         p->statusbar()->set_status_text(wxString::Format(_(L("AMF file exported to %s")), path));
@@ -2972,6 +2990,7 @@ void Plater::export_3mf(const boost::filesystem::path& output_path)
 
 	DynamicPrintConfig cfg = wxGetApp().preset_bundle->full_config_secure();
     const std::string path_u8 = into_u8(path);
+    wxBusyCursor wait;
     if (Slic3r::store_3mf(path_u8.c_str(), &p->model, export_config ? &cfg : nullptr)) {
         // Success
         p->statusbar()->set_status_text(wxString::Format(_(L("3MF file exported to %s")), path));
@@ -3052,13 +3071,20 @@ void Plater::on_extruders_change(int num_extruders)
 void Plater::on_config_change(const DynamicPrintConfig &config)
 {
     bool update_scheduled = false;
+#if ENABLE_REWORKED_BED_SHAPE_CHANGE
+    bool bed_shape_changed = false;
+#endif // ENABLE_REWORKED_BED_SHAPE_CHANGE
     for (auto opt_key : p->config->diff(config)) {
         p->config->set_key_value(opt_key, config.option(opt_key)->clone());
         if (opt_key == "printer_technology")
             this->set_printer_technology(config.opt_enum<PrinterTechnology>(opt_key));
         else if (opt_key == "bed_shape") {
+#if ENABLE_REWORKED_BED_SHAPE_CHANGE
+            bed_shape_changed = true;
+#else
             if (p->view3D) p->view3D->set_bed_shape(p->config->option<ConfigOptionPoints>(opt_key)->values);
             if (p->preview) p->preview->set_bed_shape(p->config->option<ConfigOptionPoints>(opt_key)->values);
+#endif // ENABLE_REWORKED_BED_SHAPE_CHANGE
             update_scheduled = true;
         } 
         else if (boost::starts_with(opt_key, "wipe_tower") ||
@@ -3084,8 +3110,12 @@ void Plater::on_config_change(const DynamicPrintConfig &config)
         }
         else if (opt_key == "printer_model") {
             // update to force bed selection(for texturing)
+#if ENABLE_REWORKED_BED_SHAPE_CHANGE
+            bed_shape_changed = true;
+#else
             if (p->view3D) p->view3D->set_bed_shape(p->config->option<ConfigOptionPoints>("bed_shape")->values);
             if (p->preview) p->preview->set_bed_shape(p->config->option<ConfigOptionPoints>("bed_shape")->values);
+#endif // ENABLE_REWORKED_BED_SHAPE_CHANGE
             update_scheduled = true;
         }
         else if (opt_key == "host_type" && this->p->printer_technology == ptSLA) {
@@ -3098,11 +3128,39 @@ void Plater::on_config_change(const DynamicPrintConfig &config)
         p->sidebar->show_send(prin_host_opt != nullptr && !prin_host_opt->value.empty());
     }
 
+#if ENABLE_REWORKED_BED_SHAPE_CHANGE
+    if (bed_shape_changed)
+    {
+        if (p->view3D) p->view3D->set_bed_shape(p->config->option<ConfigOptionPoints>("bed_shape")->values);
+        if (p->preview) p->preview->set_bed_shape(p->config->option<ConfigOptionPoints>("bed_shape")->values);
+    }
+#endif // ENABLE_REWORKED_BED_SHAPE_CHANGE
+
     if (update_scheduled) 
         update();
 
     if (p->main_frame->is_loaded())
         this->p->schedule_background_process();
+}
+
+void Plater::on_activate()
+{
+#ifdef __linux__
+    wxWindow *focus_window = wxWindow::FindFocus();
+    // Activating the main frame, and no window has keyboard focus.
+    // Set the keyboard focus to the visible Canvas3D.
+    if (this->p->view3D->IsShown() && (!focus_window || focus_window == this->p->view3D->get_wxglcanvas()))
+        this->p->view3D->get_wxglcanvas()->SetFocus();
+
+    else if (this->p->preview->IsShown() && (!focus_window || focus_window == this->p->view3D->get_wxglcanvas()))
+        this->p->preview->get_wxglcanvas()->SetFocus();
+#endif
+
+    if (! this->p->delayed_error_message.empty()) {
+		std::string msg = std::move(this->p->delayed_error_message);
+		this->p->delayed_error_message.clear();
+        GUI::show_error(this, msg);
+	}
 }
 
 const wxString& Plater::get_project_filename() const
