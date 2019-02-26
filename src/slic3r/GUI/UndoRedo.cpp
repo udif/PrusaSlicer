@@ -100,10 +100,10 @@ void UndoRedo::ChangeVolumeTransformation::redo()
 
 ////////////////////////////////////////////////////////////////
 
-UndoRedo::ChangeVolumeType::ChangeVolumeType(Model* model, ModelVolume* vol, ModelVolume::Type new_type)
+UndoRedo::ChangeVolumeType::ChangeVolumeType(Model* model, ModelVolume* vol, ModelVolumeType new_type)
 : ChangeVolumeType(model, get_idx(vol->get_object()), get_idx(vol), new_type) {}
 
-UndoRedo::ChangeVolumeType::ChangeVolumeType(Model* model, int mo_idx, int mv_idx, ModelVolume::Type new_type)
+UndoRedo::ChangeVolumeType::ChangeVolumeType(Model* model, int mo_idx, int mv_idx, ModelVolumeType new_type)
 : m_mo_idx(mo_idx), m_mv_idx(mv_idx), m_new_type(new_type)
 {
     m_model = model;

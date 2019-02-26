@@ -27,10 +27,10 @@ public:
     void change_name(int mo_idx, int mv_idx, const std::string& name) {
         action(new ChangeName(m_model, mo_idx, mv_idx, name));
     }
-    void change_volume_type(ModelVolume* vol, ModelVolume::Type vol_type) {
+    void change_volume_type(ModelVolume* vol, ModelVolumeType vol_type) {
         action(new ChangeVolumeType(m_model, vol, vol_type));
     }
-    void change_volume_type(int mo_idx, int mv_idx, ModelVolume::Type vol_type) {
+    void change_volume_type(int mo_idx, int mv_idx, ModelVolumeType vol_type) {
         action(new ChangeVolumeType(m_model, mo_idx, mv_idx, vol_type));
     }
 
@@ -119,15 +119,15 @@ private:
 
     class ChangeVolumeType : public Command {
     public:
-        ChangeVolumeType(Model* model, int mo_idx, int mv_idx, ModelVolume::Type new_type);
-        ChangeVolumeType(Model* model, ModelVolume* vol, ModelVolume::Type new_type);
+        ChangeVolumeType(Model* model, int mo_idx, int mv_idx, ModelVolumeType new_type);
+        ChangeVolumeType(Model* model, ModelVolume* vol, ModelVolumeType new_type);
         void redo() override;
         void undo() override;
     private:
         int m_mo_idx;
         int m_mv_idx;
-        ModelVolume::Type m_old_type;
-        ModelVolume::Type m_new_type;
+        ModelVolumeType m_old_type;
+        ModelVolumeType m_new_type;
     };
 
     class ChangeVolumeTransformation : public Command {
