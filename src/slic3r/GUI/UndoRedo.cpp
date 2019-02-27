@@ -3,6 +3,8 @@
 #include "GUI_ObjectList.hpp"
 #include "GLCanvas3D.hpp"
 
+#define UNDOREDO_DEBUG 1
+
 namespace Slic3r {
     
 static int get_idx(ModelInstance* inst)
@@ -61,7 +63,7 @@ UndoRedo::ChangeInstanceTransformation::ChangeInstanceTransformation(Model* mode
     m_model = model;
     m_description = "Change instance transformation";
     try {
-    m_old_transformation = m_model->objects.at(m_mo_idx)->instances.at(mi_idx)->get_transformation();
+        m_old_transformation = m_model->objects.at(m_mo_idx)->instances.at(mi_idx)->get_transformation();
     } catch (...) { std::cout << "!!!" << std::endl; m_old_transformation = Geometry::Transformation(); }
 }
 
@@ -152,9 +154,58 @@ void UndoRedo::ChangeName::redo()
 }
 
 ////////////////////////////////////////////////////////////////
+UndoRedo::AddInstance::AddInstance(Model* model, ModelObject* mo, int mi_idx, const Geometry::Transformation& t)
+: AddInstance(model, get_idx(mo), mi_idx, t) {}
 
+UndoRedo::AddInstance::AddInstance(Model* model, int mo_idx, int mi_idx, const Geometry::Transformation& t)
+: m_mo_idx(mo_idx),
+  m_mi_idx(mi_idx == -1 ? model->objects[mo_idx]->instances.size() : mi_idx),
+  m_transformation(t)
+{
+    m_model = model;
+    m_description = "Add instance";
+}
 
+void UndoRedo::AddInstance::undo()
+{
+    ModelObject* mo = m_model->objects[m_mo_idx];
+    delete (mo->instances[m_mi_idx]);
+    mo->instances.erase(mo->instances.begin() + m_mi_idx);
+    mo->invalidate_bounding_box();
+}
 
+void UndoRedo::AddInstance::redo()
+{
+    ModelObject* mo = m_model->objects[m_mo_idx];
+    ModelInstance* i = new ModelInstance(mo);
+    i->m_transformation = m_transformation;
+    mo->instances.insert(mo->instances.begin() + m_mi_idx, i);
+    mo->invalidate_bounding_box();
+}
+
+////////////////////////////////////////////////////////////////////
+
+UndoRedo::RemoveInstance::RemoveInstance(Model* model, ModelObject* mo, int mi_idx)
+: RemoveInstance(model, get_idx(mo), mi_idx) {}
+
+UndoRedo::RemoveInstance::RemoveInstance(Model* model, int mo_idx, int mi_idx)
+: m_command_add_instance(model, mo_idx, mi_idx, (mi_idx == -1 ? model->objects[mo_idx]->instances.back() : model->objects[mo_idx]->instances[mi_idx])->m_transformation)
+{
+    m_model = model;
+    m_description = "Remove instance";
+}
+
+void UndoRedo::RemoveInstance::undo()
+{
+    m_command_add_instance.redo();
+}
+
+void UndoRedo::RemoveInstance::redo()
+{
+    m_command_add_instance.undo();
+}
+
+////////////////////////////////////////////////////////////////////
 /*
 void UndoRedo::Change::redo()
 {
@@ -231,118 +282,27 @@ void UndoRedo::RemoveInstance::undo()
 
 void UndoRedo::begin_batch(const std::string& desc)
 {
-    if (m_batch_start || m_batch_running)
-        throw std::runtime_error("UndoRedo does not allow nested batches.");
-    m_batch_desc = desc;
-    m_batch_start = true;
+    if (m_batch_depth == 0)
+        m_batch_desc = desc;
+    ++m_batch_depth;
+
+#ifdef UNDOREDO_DEBUG
+    std::cout << "begin_batch (" << desc << ") : m_batch_depth=" << m_batch_depth << std::endl;
+#endif
+
 }
 
 
 void UndoRedo::end_batch() {
-    if (!m_batch_start && !m_batch_running)
-        throw std::runtime_error("UndoRedo batch closed when none was started.");
+    --m_batch_depth;
+    if (m_batch_depth < 0)
+        throw std::runtime_error("UndoRedo: extra end_batch call.");
 
-    m_batch_start = false;
-    m_batch_running = false;
+    m_batch_running = (m_batch_depth > 0);
+#ifdef UNDOREDO_DEBUG
+    std::cout << "end_batch : m_batch_depth=" << m_batch_depth << std::endl;
+#endif
 }
-/*
-void UndoRedo::begin(ModelInstance* inst)
-{
-    if (working())
-        return;
-
-    if (m_current_command_type != CommandType::None)
-        throw std::runtime_error("Undo/Redo stack - attemted to nest commands.");
-
-    ModelObject* mo = inst->get_object();
-    m_model_instance_data.mi_idx = get_idx(inst);
-    m_model_instance_data.inst_num = mo->instances.size();
-    m_model_instance_data.mo_idx = get_idx(mo);
-    m_model_instance_data.transformation = inst->get_transformation();
-    m_current_command_type = CommandType::ModelInstanceManipulation;
-}
-
-void UndoRedo::begin(ModelVolume* vol)
-{
-    if (working())
-        return;
-
-    if (m_current_command_type != CommandType::None)
-        throw std::runtime_error("Undo/Redo stack - attemted to nest commands.");
-
-    m_model_volume_data.mv_idx = get_idx(vol);
-    m_model_volume_data.mo_idx = get_idx(vol->get_object());
-    m_model_volume_data.vols_num = vol->get_object()->volumes.size();
-    m_model_volume_data.transformation = vol->get_transformation();
-    m_model_volume_data.name = vol->name;
-    m_model_volume_data.type = vol->type();
-    m_current_command_type = CommandType::ModelVolumeManipulation;
-}
-
-void UndoRedo::begin(ModelObject* mo)
-{
-    if (working())
-        return;
-
-    if (m_current_command_type != CommandType::None)
-        throw std::runtime_error("Undo/Redo stack - attemted to nest commands.");
-
-    unsigned int i=0;
-    for (; i<m_model->objects.size(); ++i)
-        if (m_model->objects[i] == mo)
-            break;
-    m_model_object_data.mo_idx = i;
-    m_model_object_data.inst_num = mo->instances.size();
-    m_current_command_type = CommandType::ModelObjectManipulation;
-}
-
-
-void UndoRedo::end() 
-{
-    if (working())
-        return;
-
-    if (m_current_command_type == CommandType::None)
-        throw std::runtime_error("Undo/Redo stack - unexpected command end.");
-        
-    if (m_current_command_type == CommandType::ModelInstanceManipulation) {
-        if (m_model->objects[m_model_instance_data.mo_idx]->instances.size() != m_model_instance_data.inst_num) {
-            // the instance was deleted
-            push(new RemoveInstance(m_model,
-                                    m_model_instance_data.transformation,
-                                    m_model_instance_data.mo_idx,
-                                    m_model_instance_data.mi_idx));
-        }
-        else {
-            // the transformation matrix was changed
-            push(new Change(m_model->objects[m_model_instance_data.mo_idx]->instances[m_model_instance_data.mi_idx],
-                            m_model_instance_data.transformation,
-                            m_model->objects[m_model_instance_data.mo_idx]->instances[m_model_instance_data.mi_idx]->get_transformation()));
-        }
-    }
-
-    if (m_current_command_type == CommandType::ModelObjectManipulation) {
-        if (m_model->objects[m_model_object_data.mo_idx]->instances.size() > m_model_object_data.inst_num) {
-            // an instance was added - the one at the end
-            push(new AddInstance(m_model->objects[m_model_object_data.mo_idx]->instances.back(), m_model_object_data.mo_idx));
-        }
-    }
-
-    if (m_current_command_type == CommandType::ModelVolumeManipulation) {
-        if (m_model->objects[m_model_volume_data.mo_idx]->volumes.size() != m_model_volume_data.vols_num) {
-            // the volume was deleted
-
-        }
-        else {
-            // the transformation matrix, name or type was changed
-            ModelVolume* mv = m_model->objects[m_model_volume_data.mo_idx]->volumes[m_model_volume_data.mv_idx];
-            push(new Change(mv, m_model_volume_data.transformation, mv->get_transformation(), m_model_volume_data.name, mv->name, m_model_volume_data.type, mv->type()));
-        }
-    }
-
-    m_current_command_type = CommandType::None;
-}
-*/
 
 //////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////
@@ -350,7 +310,7 @@ void UndoRedo::end()
 void UndoRedo::push(Command* command) {
     if (m_batch_running)
         command->m_bound_to_previous = true;
-    if (m_batch_start)
+    if (m_batch_depth > 0)
         m_batch_running = true;
     if (m_batch_running)
         command->m_description = m_batch_desc;
@@ -360,6 +320,7 @@ void UndoRedo::push(Command* command) {
      m_index = m_stack.size();
 
      GUI::wxGetApp().plater()->canvas3D()->toolbar_update_undo_redo();
+     print_stack();
 }
 
 
@@ -372,6 +333,7 @@ void UndoRedo::undo()
         --m_index;
         m_stack[m_index]->undo();
     } while (m_stack[m_index]->m_bound_to_previous);
+    print_stack();
 }
 
 void UndoRedo::redo()
@@ -383,6 +345,15 @@ void UndoRedo::redo()
         m_stack[m_index]->redo();
         ++m_index;
     } while (m_index < m_stack.size() && m_stack[m_index]->m_bound_to_previous);
+    print_stack();
+}
+
+
+void UndoRedo::print_stack() const
+{
+    std::cout << "=============================" << std::endl;
+    for (unsigned int i = 0; i<m_stack.size(); ++i)
+        std::cout << i << "\t" << (i==m_index ? "->" : "  ") << typeid(*(m_stack[i])).name()+19 << "\t" << m_stack[i]->m_bound_to_previous << std::endl;    
 }
 
 } // namespace Slic3r

@@ -520,8 +520,11 @@ private:
     // Parent object, owning this instance.
     ModelObject* object;
 
+public: // UNDOREDO: this needs to be solved differently, the constructor was and probably should stay private.
     // Constructor, which assigns a new unique ID.
     explicit ModelInstance(ModelObject *object) : object(object), print_volume_state(PVS_Inside) {}
+
+private:
     // Constructor, which assigns a new unique ID.
     explicit ModelInstance(ModelObject *object, const ModelInstance &other) :
         m_transformation(other.m_transformation), object(object), print_volume_state(PVS_Inside) {}

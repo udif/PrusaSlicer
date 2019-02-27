@@ -769,51 +769,35 @@ ModelInstance* ModelObject::add_instance(int idx)
 {
     if (idx == -1)
         idx = instances.size();
-
-    //this->get_model()->undo->begin(this);
-
-    ModelInstance* i = new ModelInstance(this);
-    this->instances.insert(instances.begin() + idx, i);
-    //this->instances.push_back(i);
-    this->invalidate_bounding_box();
-
-    //this->get_model()->undo->end();
-
-    return i;
+    this->get_model()->undo->add_instance(this, idx);
+    return this->instances[idx];
 }
 
 ModelInstance* ModelObject::add_instance(const ModelInstance &other)
 {
-    //this->get_model()->undo->begin(this);
-    ModelInstance* i = new ModelInstance(this, other);
-    this->instances.push_back(i);
-    this->invalidate_bounding_box();
-    //this->get_model()->undo->end();
-    return i;
+    this->get_model()->undo->add_instance(this, -1, other.m_transformation);
+    return instances.back();
 }
 
 ModelInstance* ModelObject::add_instance(const Vec3d &offset, const Vec3d &scaling_factor, const Vec3d &rotation, const Vec3d &mirror)
 {
-    //this->get_model()->undo->begin_batch("Add instance");
+    this->get_model()->undo->begin_batch("Add instance");
     auto *instance = add_instance();
-    //this->get_model()->undo->begin(instance);
     instance->set_offset(offset);
     instance->set_scaling_factor(scaling_factor);
     instance->set_rotation(rotation);
     instance->set_mirror(mirror);
-    //this->get_model()->undo->end();
-    //this->get_model()->undo->end_batch();
+    this->get_model()->undo->end_batch();
     return instance;
 }
 
 void ModelObject::delete_instance(size_t idx)
 {
-    ModelInstancePtrs::iterator i = this->instances.begin() + idx;
-    //this->get_model()->undo->begin(instances[idx]);
+    /*ModelInstancePtrs::iterator i = this->instances.begin() + idx;
     delete *i;
     this->instances.erase(i);
-    //this->get_model()->undo->end();
-    this->invalidate_bounding_box();
+    this->invalidate_bounding_box();*/
+    this->get_model()->undo->remove_instance(this, idx);
 }
 
 void ModelObject::delete_last_instance()
@@ -823,11 +807,12 @@ void ModelObject::delete_last_instance()
 
 void ModelObject::clear_instances()
 {
+    std::cout << "***************************************************CLEAR INSTANCES" << std::endl;
+    // UNDOREDO: see where this is called from and how it should use the undo/redo stack
+
     while (!instances.empty()) {
-        //get_model()->undo->begin(instances.back());
         delete instances.back();
         instances.pop_back();
-        //get_model()->undo->end();
     }
 
     this->invalidate_bounding_box();

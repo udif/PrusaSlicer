@@ -2894,7 +2894,8 @@ void Plater::increase_instances(size_t num)
     ModelInstance* model_instance = model_object->instances.back();
 
     bool was_one_instance = model_object->instances.size()==1;
-        
+    model_object->get_model()->undo->begin_batch("Add instance");
+
     float offset = 10.0;
     for (size_t i = 0; i < num; i++, offset += 10.0) {
         Vec3d offset_vec = model_instance->get_offset() + Vec3d(offset, offset, 0.0);
@@ -2910,6 +2911,7 @@ void Plater::increase_instances(size_t num)
         p->update();
     }
 
+    model_object->get_model()->undo->end_batch();
     p->get_selection().add_instance(obj_idx, (int)model_object->instances.size() - 1);
 
     p->selection_changed();
@@ -2924,6 +2926,8 @@ void Plater::decrease_instances(size_t num)
         return;
 
     ModelObject* model_object = p->model.objects[obj_idx];
+    model_object->get_model()->undo->begin_batch("Remove instance");
+
     if (model_object->instances.size() > num) {
         for (size_t i = 0; i < num; ++ i)
             model_object->delete_last_instance();
@@ -2934,6 +2938,7 @@ void Plater::decrease_instances(size_t num)
     }
 
     p->update();
+    model_object->get_model()->undo->end_batch();
 
     if (!model_object->instances.empty())
         p->get_selection().add_instance(obj_idx, (int)model_object->instances.size() - 1);

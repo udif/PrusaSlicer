@@ -1296,9 +1296,11 @@ void ObjectList::del_instances_from_object(const int obj_idx)
         return;
 
     while ( instances.size()> 1)
-        instances.pop_back();
+        // instances.pop_back(); // UNDOREDO: this was a memory leak!
+        (*m_objects)[obj_idx]->delete_last_instance();
 
-    (*m_objects)[obj_idx]->invalidate_bounding_box(); // ? #ys_FIXME
+    // UNDOREDO: delete_last_instance invalidates bb internally
+    // (*m_objects)[obj_idx]->invalidate_bounding_box(); // ? #ys_FIXME
 
     m_parts_changed = true;
     parts_changed(obj_idx);
@@ -1306,6 +1308,8 @@ void ObjectList::del_instances_from_object(const int obj_idx)
 
 bool ObjectList::del_subobject_from_object(const int obj_idx, const int idx, const int type)
 {
+    auto undo_scoped_batch = m_objects->front()->get_model()->undo->begin_scoped_batch("Delete subobject");
+
 	if (obj_idx == 1000)
 		// Cannot delete a wipe tower.
 		return false;

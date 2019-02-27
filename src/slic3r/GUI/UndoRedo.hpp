@@ -12,6 +12,8 @@ class UndoRedo {
 public:
     UndoRedo(Model* model) : m_model(model) {}
 
+    // Calling either of following functions creates an instance of the Command object,
+    // pushes in onto the stack and calls its redo() function to actually modify the Model
     void change_instance_transformation(ModelInstance* inst, const Geometry::Transformation& t) {
         action(new ChangeInstanceTransformation(m_model, inst, t));
     }
@@ -33,35 +35,47 @@ public:
     void change_volume_type(int mo_idx, int mv_idx, ModelVolumeType vol_type) {
         action(new ChangeVolumeType(m_model, mo_idx, mv_idx, vol_type));
     }
+    void add_instance(ModelObject* mo, int mi_idx = -1, const Geometry::Transformation& t = Geometry::Transformation()) {
+        action(new AddInstance(m_model, mo, mi_idx, t));
+    }
+    void remove_instance(ModelObject* mo, int mi_idx = -1) {
+        action(new RemoveInstance(m_model, mo, mi_idx));
+    }
 
     // ModelObject - deletion / name change / new instance / new ModelVolume / config change / layer_editing
     // ModelInstance - deletion / transformation matrix change
     // ModelVolume - deletion / transformation change / ModelType change / name change / config change
 
+    // Wrapping the actions between begin_batch() and end_batch() means they will
+    // be marked as connected together to be undone/redone together.
     void begin_batch(const std::string& desc);
     void end_batch();
 
-    bool anything_to_redo() const {
-        return (!m_stack.empty() && m_index != m_stack.size());
-    }
+    // RAII helper object to ensure pairing of begin_batch - end_batch.
+    class ScopedBatch
+    {
+    public:
+        ScopedBatch(UndoRedo* undo, const std::string& desc) : m_undo(undo) { undo->begin_batch(desc); }
+        ~ScopedBatch() { m_undo->end_batch(); }
 
-    bool anything_to_undo() const {
-        return (!m_stack.empty() && m_index != 0);
-    }
+    private:
+        UndoRedo* m_undo; // backpointer to parent object
+    };
+    // Calls begin_batch and returns an object which automatically calls end_batch on destruction (RAII).
+    ScopedBatch begin_scoped_batch(const std::string& desc) { return ScopedBatch(this, desc); };
 
+    // Returns information about current stack index position.
+    bool anything_to_redo() const { return (!m_stack.empty() && m_index != m_stack.size()); }
+    bool anything_to_undo() const { return (!m_stack.empty() && m_index != 0); }
+    std::string get_undo_description() const { return m_stack[m_index-1]->m_description; }
+    std::string get_redo_description() const { return m_stack[m_index]->m_description;   }
+
+    // Performs the undo/redo and moves the stack index accordingly.
     void undo();
     void redo();
 
-    std::string get_undo_description() const {
-        return m_stack[m_index-1]->m_description;
-    }
-    std::string get_redo_description() const {
-        return m_stack[m_index]->m_description;
-    }
-
-
-
 private:
+    // Abstract class representing an undoable/redoable action.
     class Command {
     public:
         virtual void redo() = 0;
@@ -72,6 +86,8 @@ private:
         Model* m_model;
     };
 
+    // Following classes represent concrete undoable actions. Any information necessary to perform the action
+    // is saved as a member variable in constructor.
     class ChangeInstanceTransformation : public Command {
     public:
         ChangeInstanceTransformation(Model* model, int mo_idx, int mi_idx, const Geometry::Transformation& transformation);
@@ -85,17 +101,29 @@ private:
         Geometry::Transformation m_new_transformation;
     };
 
-    /*class AddInstance : public Command {
+    class AddInstance : public Command {
     public:
-        AddInstance(int mo_idx, int mi_idx);
+        AddInstance(Model* model, ModelObject* mo, int mi_idx, const Geometry::Transformation& t);
+        AddInstance(Model* model, int mo_idx, int mi_idx, const Geometry::Transformation& t);
         void redo() override;
         void undo() override;
     private:
         int m_mo_idx;
         int m_mi_idx;
+        Geometry::Transformation m_transformation;
     };
 
     class RemoveInstance : public Command {
+    public:
+        RemoveInstance(Model* model, ModelObject* mo, int mi_idx);
+        RemoveInstance(Model* model, int mo_idx, int mi_idx);
+        void redo() override;
+        void undo() override;
+    private:
+        AddInstance m_command_add_instance;
+    };
+
+    /*class RemoveInstance : public Command {
     public:
         RemoveInstance(int mo_idx, int mi_idx);
         void redo() override;
@@ -131,7 +159,7 @@ private:
     };
 
     class ChangeVolumeTransformation : public Command {
-        public:
+    public:
         ChangeVolumeTransformation(Model* model, ModelVolume* vol, const Geometry::Transformation& transformation);
         ChangeVolumeTransformation(Model* model, int mo_idx, int mv_idx, const Geometry::Transformation& transformation);
         void redo() override;
@@ -143,16 +171,14 @@ private:
         Geometry::Transformation m_new_transformation;
     };
 
-private:
     void action(Command* command);
     void push(Command* command);
-    bool working() const;
+    void print_stack() const;
 
-private:
 	std::vector<std::unique_ptr<Command>> m_stack;
 	unsigned int m_index = 0;
     std::string m_batch_desc = "";
-    bool m_batch_start = false;
+    unsigned int m_batch_depth = 0; // how many times begin_batch was called (to allow nesting)
     bool m_batch_running = false;
     Model* m_model;
 };
