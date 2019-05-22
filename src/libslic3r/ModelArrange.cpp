@@ -629,7 +629,7 @@ void applyResult(
         ShapeData2D& shapemap)
 {
     UndoRedo* undo = shapemap[group[0].first].first->get_object()->get_model()->undo;
-    undo->begin_batch("Arrange");
+    undo->begin_scoped_batch("Arrange");
 
     for(auto& r : group) {
         auto idx = r.first;     // get the original item index
@@ -652,7 +652,6 @@ void applyResult(
         inst_ptr->set_rotation(Z, rot);
         inst_ptr->set_offset(foff);
     }
-    undo->end_batch();
 }
 
 // Get the type of bed geometry from a simple vector of points.

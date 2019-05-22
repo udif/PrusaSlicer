@@ -30,6 +30,17 @@ Model::Model()
     undo = new UndoRedo(this);
 }
 
+
+
+Model::~Model()
+{
+    this->clear_objects();
+    this->clear_materials();
+    delete undo;
+}
+
+
+
 Model& Model::assign_copy(const Model &rhs)
 {
     this->copy_id(rhs);
@@ -671,13 +682,9 @@ void ModelObject::assign_new_unique_ids_recursive()
 
 ModelVolume* ModelObject::add_volume(const TriangleMesh &mesh)
 {
-    ModelVolume* v = new ModelVolume(this, mesh);
-    this->volumes.push_back(v);
-#if ENABLE_VOLUMES_CENTERING_FIXES
-    v->center_geometry();
-#endif // ENABLE_VOLUMES_CENTERING_FIXES
-    this->invalidate_bounding_box();
-    return v;
+    std::cout << "================" << std::endl;
+    this->get_model()->undo->add_volume(this, this->volumes.size(), mesh);
+    return this->volumes.back();
 }
 
 ModelVolume* ModelObject::add_volume(TriangleMesh &&mesh)
@@ -807,7 +814,7 @@ void ModelObject::delete_last_instance()
 
 void ModelObject::clear_instances()
 {
-    std::cout << "***************************************************CLEAR INSTANCES" << std::endl;
+    //std::cout << "***************************************************CLEAR INSTANCES" << std::endl;
     // UNDOREDO: see where this is called from and how it should use the undo/redo stack
 
     while (!instances.empty()) {

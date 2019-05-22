@@ -1,3 +1,83 @@
+//----------------------------------
+// ARCHITECTURE DESCRIPTION
+//
+// - UndoRedo object is a part of Model - each Model has its own with the whole history
+// Undoable actions:
+    // ModelObject - deletion / name change / new instance / new ModelVolume / config change / layer_editing
+    // ModelInstance - deletion / transformation matrix change
+    // ModelVolume - deletion / transformation change / ModelType change / name change / config change
+    
+    // NOT undoable actions (not part of Model)
+    // global config changes / switching profiles    
+
+
+// - Model is only modified through UndoRedo public methods - ideally, no one else has write access
+
+// - when one of these methods is called, an object derived from abstract Command class is created and everything
+//   that needs to be done (which object is being manipulated and how, etc.) is saved as private data in this object
+
+// - Objects, instances and volumes are referencd by the ids in the respective vector. This ensures that same objects
+//   are referenced no matter how the stack is traversed (i.e., no pointers are saved)
+
+// - UndoRedo manages the stack (std::vector<std::unique_ptr<Command*>>) and keeps an index to current position
+
+// - the unique_ptr to this object is then pushed on the stack and virtual redo() method is called to 
+//   do the action (this ensures that doing and redoing the action goes through the same function and there is no need
+//   to have the code in two places and keep it in sync)
+
+// - if several actions are supposed to be undone simultaneously (e.g. arrange = multiple consecutive object manipulation),
+//   the Command is flagged to be bound to previous Command. When undo is invoked, actions are being undone one by one,
+//   until one not bound to the previous is encountered. Whenever one wants to stack actions like this, it is enough
+//   to use RAII helper (as seen in ModelArrange.cpp (632)
+
+// - moving back the stack and then doing any action clears all the stack records past the current index position.
+//   This allows all resources (saved meshes, etc) to be released in RAII manner in Command child (virtual) destructor.
+
+
+//----------------------------------
+// PROs: - it should be relatively simple to extend current code without major modifications
+//       - managing the actions and data needed to do them is encapsulated in the Command-derived objects
+//       - only changes are saved, not the whole scene state
+//       - UndoRedo does not have to be aware of actions that can be divided into several simpler ones (such as arrange or cut)
+
+// CONs: - some actions are saved needlessly (such as center_around_origin, etc.)
+
+
+//-----------------------------------
+// Issues to solve
+// * accessing and managing the UndoRedo object is currently too verbose. the global Model UndoRedo should be accessible
+//   (auto undo_scoped_batch = m_objects->front()->get_model()->undo->begin_scoped_batch("Delete subobject");)
+//
+// * moving objects from one Model to another (which happens when loading objects, 3MFs, etc.)
+//      - the idea is to take all actions that modify the moved object from one stack and push them as a batch to the other
+//        (adding that object would then appear as a single action from the outside world)
+
+// * take care of proper synchronization between 3D scene and ObjectList
+
+// * make sure that any action stops background processing (all actions invoke the UndoRedo::action(...) function, so it should
+//   be enough to do it there) and invalidate what necessary (apply()) - I don't think it is worth taking care of revalidating
+//   objects when an action is undone and then redone again.
+
+// * decide about where to store meshes of deleted volumes. It could be possible to keep them in memory until this action is pushed
+//   deeper into the stack, them dump it to temp file (which could be done in separate thread) to release the memory.
+
+
+
+//------------------------------------
+// CURRENT STATUS:
+// - not meant as candidate to merge, just a curious novice attempt
+// - has not been rebased onto master for quite some time
+// - transformation (incl. arrange and place to bed), changing name and type of object can be undone/redone
+// - adding/removing instances partly works
+// - adding/removing volumes is not finished
+// - often crashes (doing an action that is not fully covered in UndoRedo makes UndoRedo find inconsistencies, 
+//   it attempts to undo transformation on object that was deleted by its back, etc.) This problem should
+//   solve itself when all actions are done through the UndoRedo pipeline
+
+
+
+
+
 #ifndef UNDOREDO_HPP
 #define UNDOREDO_HPP
 
@@ -6,6 +86,27 @@
 #include <memory>
 
 namespace Slic3r {
+
+    
+static int get_idx(ModelInstance* inst)
+{
+    const ModelObject* mo = inst->get_object();
+    int i=0;
+    for (i=0; i<(int)mo->instances.size(); ++i)
+        if (mo->instances[i] == inst)
+            return i;
+    return -1;
+}
+
+static int get_idx(ModelObject* mo)
+{
+    const Model* model = mo->get_model();
+    int i=0;
+    for (i=0; i<(int)model->objects.size(); ++i)
+        if (model->objects[i] == mo)
+            return i;
+    return -1;
+}
 
 
 class UndoRedo {
@@ -41,10 +142,10 @@ public:
     void remove_instance(ModelObject* mo, int mi_idx = -1) {
         action(new RemoveInstance(m_model, mo, mi_idx));
     }
+    void add_volume(ModelObject* mo, int mv_idx, TriangleMesh mesh) {
+        action(new AddVolume(m_model, get_idx(mo), mv_idx, mesh));
+    }
 
-    // ModelObject - deletion / name change / new instance / new ModelVolume / config change / layer_editing
-    // ModelInstance - deletion / transformation matrix change
-    // ModelVolume - deletion / transformation change / ModelType change / name change / config change
 
     // Wrapping the actions between begin_batch() and end_batch() means they will
     // be marked as connected together to be undone/redone together.
@@ -170,10 +271,23 @@ private:
         Geometry::Transformation m_old_transformation;
         Geometry::Transformation m_new_transformation;
     };
+    
+    class AddVolume : public Command {
+    public:
+        AddVolume(Model* model, int mo_idx, int mv_idx, TriangleMesh mesh);
+        void redo() override;
+        void undo() override;
+    private:
+        int m_mo_idx;
+        int m_mv_idx;
+        TriangleMesh m_mesh;
+    };
 
-    void action(Command* command);
-    void push(Command* command);
-    void print_stack() const;
+
+// These are the private methods and variables that manage the stack itself:
+    void action(Command* command); // push to stack and perform (all undoable actions go through this)
+    void push(Command* command);   // pushes to stack
+    void print_stack() const;      // prints stack (incl. current index position) to stdout
 
 	std::vector<std::unique_ptr<Command>> m_stack;
 	unsigned int m_index = 0;

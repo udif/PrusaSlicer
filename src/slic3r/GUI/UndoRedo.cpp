@@ -6,26 +6,7 @@
 #define UNDOREDO_DEBUG 1
 
 namespace Slic3r {
-    
-static int get_idx(ModelInstance* inst)
-{
-    const ModelObject* mo = inst->get_object();
-    int i=0;
-    for (i=0; i<(int)mo->instances.size(); ++i)
-        if (mo->instances[i] == inst)
-            return i;
-    return -1;
-}
 
-static int get_idx(ModelObject* mo)
-{
-    const Model* model = mo->get_model();
-    int i=0;
-    for (i=0; i<(int)model->objects.size(); ++i)
-        if (model->objects[i] == mo)
-            return i;
-    return -1;
-}
 
 static int get_idx(ModelVolume* vol)
 {
@@ -206,6 +187,35 @@ void UndoRedo::RemoveInstance::redo()
 }
 
 ////////////////////////////////////////////////////////////////////
+
+UndoRedo::AddVolume::AddVolume(Model* model, int mo_idx, int mv_idx, TriangleMesh mesh)
+: m_mo_idx(mo_idx), m_mv_idx(mv_idx), m_mesh(mesh)
+{
+    m_model = model;
+    m_description = "Add volume";
+}
+
+void UndoRedo::AddVolume::undo()
+{
+    ModelObject* mo = m_model->objects[m_mo_idx];
+    delete mo->volumes[m_mv_idx];
+    mo->volumes.erase(mo->volumes.begin() + m_mv_idx);
+    mo->invalidate_bounding_box();
+}
+
+void UndoRedo::AddVolume::redo()
+{
+    ModelObject* mo = m_model->objects[m_mo_idx];
+    ModelVolume* v = new ModelVolume(mo, m_mesh);
+    mo->volumes.insert(mo->volumes.begin() + m_mv_idx, v);
+#if ENABLE_VOLUMES_CENTERING_FIXES
+    v->center_geometry();
+#endif // ENABLE_VOLUMES_CENTERING_FIXES
+    mo->invalidate_bounding_box();
+}
+
+////////////////////////////////////////////////////////////////
+
 /*
 void UndoRedo::Change::redo()
 {
@@ -353,7 +363,7 @@ void UndoRedo::print_stack() const
 {
     std::cout << "=============================" << std::endl;
     for (unsigned int i = 0; i<m_stack.size(); ++i)
-        std::cout << i << "\t" << (i==m_index ? "->" : "  ") << typeid(*(m_stack[i])).name()+19 << "\t" << m_stack[i]->m_bound_to_previous << std::endl;    
+        std::cout << i << "\t" << (i==m_index ? "->" : "  ") << m_stack[i]->m_description << "\t" << m_stack[i]->m_bound_to_previous << std::endl;     
 }
 
 } // namespace Slic3r

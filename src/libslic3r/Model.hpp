@@ -419,11 +419,13 @@ private:
     //      1   ->   is splittable
     int                     m_is_splittable {-1};
 
+public: //UNDOREDO - this should stay private
 	ModelVolume(ModelObject *object, const TriangleMesh &mesh) : mesh(mesh), m_type(ModelVolumeType::MODEL_PART), object(object)
     {
         if (mesh.stl.stats.number_of_facets > 1)
             calculate_convex_hull();
     }
+private:
     ModelVolume(ModelObject *object, TriangleMesh &&mesh, TriangleMesh &&convex_hull) :
 		mesh(std::move(mesh)), m_convex_hull(std::move(convex_hull)), m_type(ModelVolumeType::MODEL_PART), object(object) {}
 
@@ -553,7 +555,7 @@ public:
     
     // Default constructor assigns a new ID to the model.
     Model();
-    ~Model() { this->clear_objects(); this->clear_materials(); }
+    ~Model();
 
     UndoRedo* undo;
 
