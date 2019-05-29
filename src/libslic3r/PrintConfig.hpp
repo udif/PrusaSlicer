@@ -456,7 +456,7 @@ class PrintRegionConfig : public StaticPrintConfig
     STATIC_PRINT_CONFIG_CACHE(PrintRegionConfig)
 public:
     ConfigOptionFloat               bridge_angle;
-    ConfigOptionInt                 bottom_solid_layers;
+    ConfigOptionFloat               bottom_solid_thickness;
     ConfigOptionFloat               bridge_flow_ratio;
     ConfigOptionFloat               bridge_speed;
     ConfigOptionBool                ensure_vertical_shell_thickness;
@@ -491,7 +491,7 @@ public:
     // Detect thin walls.
     ConfigOptionBool                thin_walls;
     ConfigOptionFloatOrPercent      top_infill_extrusion_width;
-    ConfigOptionInt                 top_solid_layers;
+    ConfigOptionFloat               top_solid_thickness;
     ConfigOptionFloatOrPercent      top_solid_infill_speed;
     ConfigOptionBool                wipe_into_infill;
 
@@ -499,7 +499,7 @@ protected:
     void initialize(StaticCacheBase &cache, const char *base_ptr)
     {
         OPT_PTR(bridge_angle);
-        OPT_PTR(bottom_solid_layers);
+        OPT_PTR(bottom_solid_thickness);
         OPT_PTR(bridge_flow_ratio);
         OPT_PTR(bridge_speed);
         OPT_PTR(ensure_vertical_shell_thickness);
@@ -532,7 +532,7 @@ protected:
         OPT_PTR(thin_walls);
         OPT_PTR(top_infill_extrusion_width);
         OPT_PTR(top_solid_infill_speed);
-        OPT_PTR(top_solid_layers);
+        OPT_PTR(top_solid_thickness);
         OPT_PTR(wipe_into_infill);
     }
 };

@@ -26,7 +26,7 @@ wxDEFINE_EVENT(EVT_OBJ_LIST_OBJECT_SELECT, SimpleEvent);
 // pt_FFF
 FreqSettingsBundle FREQ_SETTINGS_BUNDLE_FFF =
 {
-    { L("Layers and Perimeters"), { "layer_height" , "perimeters", "top_solid_layers", "bottom_solid_layers" } },
+    { L("Layers and Perimeters"), { "layer_height" , "perimeters", "top_solid_thickness", "bottom_solid_thickness" } },
     { L("Infill")               , { "fill_density", "fill_pattern" } },
     { L("Support material")     , { "support_material", "support_material_auto", "support_material_threshold", 
                                     "support_material_pattern", "support_material_buildplate_only",

@@ -68,7 +68,7 @@ void PrintRegion::collect_object_printing_extruders(const PrintConfig &print_con
         object_extruders.emplace_back(region_config.perimeter_extruder - 1);
     if (region_config.fill_density.value > 0)
         object_extruders.emplace_back(region_config.infill_extruder - 1);
-    if (region_config.top_solid_layers.value > 0 || region_config.bottom_solid_layers.value > 0)
+    if (region_config.top_solid_thickness.value > 1e-9 || region_config.bottom_solid_thickness.value > 1e-9)
         object_extruders.emplace_back(region_config.solid_infill_extruder - 1);
 }
 

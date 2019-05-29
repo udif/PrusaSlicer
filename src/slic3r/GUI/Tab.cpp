@@ -1017,9 +1017,9 @@ void TabPrint::build()
 		optgroup->append_line(line);
 
 		optgroup = page->new_optgroup(_(L("Horizontal shells")));
-		line = { _(L("Solid layers")), "" };
-		line.append_option(optgroup->get_option("top_solid_layers"));
-		line.append_option(optgroup->get_option("bottom_solid_layers"));
+		line = { _(L("Solid thickness")), "" };
+		line.append_option(optgroup->get_option("top_solid_thickness"));
+		line.append_option(optgroup->get_option("bottom_solid_thickness"));
 		optgroup->append_line(line);
 
 		optgroup = page->new_optgroup(_(L("Quality (slower slicing)")));
@@ -1273,7 +1273,7 @@ void TabPrint::update()
 	double fill_density = m_config->option<ConfigOptionPercent>("fill_density")->value;
 
 	if (m_config->opt_bool("spiral_vase") &&
-		!(m_config->opt_int("perimeters") == 1 && m_config->opt_int("top_solid_layers") == 0 &&
+		!(m_config->opt_int("perimeters") == 1 && m_config->opt_float("top_solid_thickness") < 1e-9 &&
 		fill_density == 0)) {
 		wxString msg_text = _(L("The Spiral Vase mode requires:\n"
 			"- one perimeter\n"
@@ -1286,7 +1286,7 @@ void TabPrint::update()
 		DynamicPrintConfig new_conf = *m_config;
 		if (dialog->ShowModal() == wxID_YES) {
 			new_conf.set_key_value("perimeters", new ConfigOptionInt(1));
-			new_conf.set_key_value("top_solid_layers", new ConfigOptionInt(0));
+			new_conf.set_key_value("top_solid_thickness", new ConfigOptionFloat(0.0));
 			new_conf.set_key_value("fill_density", new ConfigOptionPercent(0));
 			new_conf.set_key_value("support_material", new ConfigOptionBool(false));
 			new_conf.set_key_value("support_material_enforce_layers", new ConfigOptionInt(0));
@@ -1413,7 +1413,7 @@ void TabPrint::update()
 					"solid_infill_every_layers", "solid_infill_below_area", "infill_extruder" })
 		get_field(el)->toggle(have_infill);
 
-	bool have_solid_infill = m_config->opt_int("top_solid_layers") > 0 || m_config->opt_int("bottom_solid_layers") > 0;
+	bool have_solid_infill = m_config->opt_float("top_solid_thickness") > 1e-9 || m_config->opt_float("bottom_solid_thickness") > 1e-9;
 	// solid_infill_extruder uses the same logic as in Print::extruders()
 	for (auto el : {"top_fill_pattern", "bottom_fill_pattern", "infill_first", "solid_infill_extruder",
 					"solid_infill_extrusion_width", "solid_infill_speed" })
@@ -1425,7 +1425,7 @@ void TabPrint::update()
 
 	get_field("gap_fill_speed")->toggle(have_perimeters && have_infill);
 
-	bool have_top_solid_infill = m_config->opt_int("top_solid_layers") > 0;
+	bool have_top_solid_infill = m_config->opt_int("top_solid_thickness") > 1e-9;
 	for (auto el : { "top_infill_extrusion_width", "top_solid_infill_speed" })
 		get_field(el)->toggle(have_top_solid_infill);
 

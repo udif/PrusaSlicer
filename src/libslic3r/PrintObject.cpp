@@ -494,8 +494,8 @@ bool PrintObject::invalidate_state_by_config_options(const std::vector<t_config_
             || opt_key == "infill_only_where_needed"
             || opt_key == "infill_every_layers"
             || opt_key == "solid_infill_every_layers"
-            || opt_key == "bottom_solid_layers"
-            || opt_key == "top_solid_layers"
+            || opt_key == "bottom_solid_thickness"
+            || opt_key == "top_solid_thickness"
             || opt_key == "solid_infill_below_area"
             || opt_key == "infill_extruder"
             || opt_key == "solid_infill_extruder"
@@ -846,8 +846,17 @@ void PrintObject::discover_vertical_shells()
         bool has_extra_layers = false;
         for (size_t idx_region = 0; idx_region < this->region_volumes.size(); ++ idx_region) {
             const PrintRegion &region = *m_print->get_region(idx_region);
+            // subtract layer heights from top downwards and count how many we do before thickness is negative
+            double thickness = region.config().top_solid_thickness.value;
+            int n_extra_top_layers = 0;
+            while (1) {
+                thickness -= m_layers[m_layers.size()-1-n_extra_top_layers]->height;
+                if (thickness < 1e-9)
+                    break;
+                n_extra_top_layers++;
+            } 
             if (region.config().ensure_vertical_shell_thickness.value && 
-                (region.config().top_solid_layers.value > 1 || region.config().bottom_solid_layers.value > 1)) {
+                (n_extra_top_layers > 0 || region.config().bottom_solid_thickness.value > m_layers[0]->height + 1e-9)) {
                 has_extra_layers = true;
             }
         }
@@ -929,8 +938,23 @@ void PrintObject::discover_vertical_shells()
         if (! region.config().ensure_vertical_shell_thickness.value)
             // This region will be handled by discover_horizontal_shells().
             continue;
-        int n_extra_top_layers    = std::max(0, region.config().top_solid_layers.value - 1);
-        int n_extra_bottom_layers = std::max(0, region.config().bottom_solid_layers.value - 1);
+        // subtract layer heights from top downwards and count how many we do before thickness is negative
+        double thickness = region.config().top_solid_thickness.value;
+        int n_extra_top_layers = 0, n_bottom_layers = 0;
+        while (1) {
+            thickness -= m_layers[m_layers.size()-1-n_extra_top_layers]->height;
+            if (thickness < 1e-9)
+                break;
+            n_extra_top_layers++;
+        } 
+        thickness = region.config().bottom_solid_thickness.value;
+        while (1) {
+            if (thickness < 1e-9)
+                break;
+            thickness -= m_layers[n_bottom_layers]->height;
+            n_bottom_layers++;
+        } 
+        int n_extra_bottom_layers = std::max(0, n_bottom_layers - 1);
         if (n_extra_top_layers + n_extra_bottom_layers == 0)
             // Zero or 1 layer, there is no additional vertical wall thickness enforced.
             continue;
@@ -2156,6 +2180,22 @@ void PrintObject::discover_horizontal_shells()
             m_print->throw_if_canceled();
             LayerRegion             *layerm = m_layers[i]->regions()[region_id];
             const PrintRegionConfig &region_config = layerm->region()->config();
+            // subtract layer heights from top downwards and count how many we do before thickness is negative
+            int n_extra_top_layers = 0, n_bottom_layers = 0;
+            double thickness = region_config.top_solid_thickness.value;
+            while (1) {
+                thickness -= m_layers[m_layers.size()-1-n_extra_top_layers]->height;
+                if (thickness < 1e-9)
+                    break;
+                n_extra_top_layers++;
+            } 
+            thickness = region_config.bottom_solid_thickness.value;
+            while (1) {
+                if (thickness < 1e-9)
+                    break;
+                thickness -= m_layers[n_bottom_layers]->height;
+                n_bottom_layers++;
+            } 
             if (region_config.solid_infill_every_layers.value > 0 && region_config.fill_density.value > 0 &&
                 (i % region_config.solid_infill_every_layers) == 0) {
                 // Insert a solid internal layer. Mark stInternal surfaces as stInternalSolid or stInternalBridge.
@@ -2197,7 +2237,7 @@ void PrintObject::discover_horizontal_shells()
                     continue;
 //                Slic3r::debugf "Layer %d has %s surfaces\n", $i, ($type == S_TYPE_TOP) ? 'top' : 'bottom';
                 
-                size_t solid_layers = (type == stTop) ? region_config.top_solid_layers.value : region_config.bottom_solid_layers.value;                
+                size_t solid_layers = (type == stTop) ? (n_extra_top_layers + 1) : n_bottom_layers;                
                 for (int n = (type == stTop) ? i-1 : i+1; std::abs(n - i) < solid_layers; (type == stTop) ? -- n : ++ n) {
                     if (n < 0 || n >= int(m_layers.size()))
                         continue;

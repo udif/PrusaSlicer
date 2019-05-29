@@ -145,14 +145,14 @@ void PrintConfigDef::init_fff_params()
     def->mode = comExpert;
     def->set_default_value(new ConfigOptionString(""));
 
-    def = this->add("bottom_solid_layers", coInt);
+    def = this->add("bottom_solid_thickness", coFloat);
     //TRN To be shown in Print Settings "Bottom solid layers"
     def->label = L("Bottom");
     def->category = L("Layers and Perimeters");
-    def->tooltip = L("Number of solid layers to generate on bottom surfaces.");
-    def->full_label = L("Bottom solid layers");
+    def->tooltip = L("Thickness of solid layer to generate on bottom surfaces.");
+    def->full_label = L("Bottom solid thickness");
     def->min = 0;
-    def->set_default_value(new ConfigOptionInt(3));
+    def->set_default_value(new ConfigOptionFloat(0.6/SCALING_FACTOR));
 
     def = this->add("bridge_acceleration", coFloat);
     def->label = L("Bridge");
@@ -1741,11 +1741,12 @@ void PrintConfigDef::init_fff_params()
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionFloatOrPercent(20, false));
 
-    def = this->add("solid_layers", coInt);
-    def->label = L("Solid layers");
-    def->tooltip = L("Number of solid layers to generate on top and bottom surfaces.");
-    def->shortcut.push_back("top_solid_layers");
-    def->shortcut.push_back("bottom_solid_layers");
+    def = this->add("solid_thickness", coFloat);
+    def->label = L("Solid thickness");
+    def->tooltip = L("Thickness of solid layers to generate on top and bottom surfaces.");
+    def->sidetext = L("mm");
+    def->shortcut.push_back("top_solid_thickness");
+    def->shortcut.push_back("bottom_solid_thickness");
     def->min = 0;
 
     def = this->add("spiral_vase", coBool);
@@ -2073,14 +2074,14 @@ void PrintConfigDef::init_fff_params()
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionFloatOrPercent(15, false));
 
-    def = this->add("top_solid_layers", coInt);
+    def = this->add("top_solid_thickness", coFloat);
     //TRN To be shown in Print Settings "Top solid layers"
     def->label = L("Top");
     def->category = L("Layers and Perimeters");
-    def->tooltip = L("Number of solid layers to generate on top surfaces.");
-    def->full_label = L("Top solid layers");
-    def->min = 0;
-    def->set_default_value(new ConfigOptionInt(3));
+    def->tooltip = L("Thickness of solid layers to generate on top surfaces.");
+    def->full_label = L("Top solid thickness");
+    def->min = 0.0;
+    def->set_default_value(new ConfigOptionFloat(1.0));
 
     def = this->add("travel_speed", coFloat);
     def->label = L("Travel");
@@ -2730,7 +2731,7 @@ void DynamicPrintConfig::normalize()
         }
         {
             this->opt<ConfigOptionInt>("perimeters", true)->value       = 1;
-            this->opt<ConfigOptionInt>("top_solid_layers", true)->value = 0;
+            this->opt<ConfigOptionFloat>("top_solid_thickness", true)->value = 0.0;
             this->opt<ConfigOptionPercent>("fill_density", true)->value  = 0;
         }
     }
@@ -2799,9 +2800,9 @@ std::string FullPrintConfig::validate()
         return "Invalid value for --perimeters";
 
     // --solid-layers
-    if (this->top_solid_layers < 0)
-        return "Invalid value for --top-solid-layers";
-    if (this->bottom_solid_layers < 0)
+    if (this->top_solid_thickness < -1e-9)
+        return "Invalid value for --top-solid-thickness";
+    if (this->bottom_solid_thickness < -1e-9)
         return "Invalid value for --bottom-solid-layers";
     
     if (this->use_firmware_retraction.value && 
@@ -2876,7 +2877,7 @@ std::string FullPrintConfig::validate()
             return "Can't make less than one perimeter when spiral vase mode is enabled";
         if (this->fill_density > 0)
             return "Spiral vase mode can only print hollow objects, so you need to set Fill density to 0";
-        if (this->top_solid_layers > 0)
+        if (this->top_solid_thickness >= 1e-9)
             return "Spiral vase mode is not compatible with top solid layers";
         if (this->support_material || this->support_material_enforce_layers > 0)
             return "Spiral vase mode is not compatible with support material";

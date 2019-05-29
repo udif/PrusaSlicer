@@ -1345,7 +1345,7 @@ void GCode::process_layer(
         bool enable = (layer.id() > 0 || print.config().brim_width.value == 0.) && (layer.id() >= print.config().skirt_height.value && ! print.has_infinite_skirt());
         if (enable) {
             for (const LayerRegion *layer_region : layer.regions())
-                if (layer_region->region()->config().bottom_solid_layers.value > layer.id() ||
+                if (layer_region->region()->config().bottom_solid_thickness.value > layer.print_z + layer.height ||
                     layer_region->perimeters.items_count() > 1 ||
                     layer_region->fills.items_count() > 0) {
                     enable = false;
