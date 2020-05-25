@@ -87,7 +87,8 @@ void AppConfig::load()
     // 1) Read the complete config file into a boost::property_tree.
     namespace pt = boost::property_tree;
     pt::ptree tree;
-    boost::nowide::ifstream ifs(AppConfig::config_path());
+    std::string s = AppConfig::config_path();
+    boost::nowide::ifstream ifs(s);
     pt::read_ini(ifs, tree);
 
     // 2) Parse the property_tree, extract the sections and key / value pairs.

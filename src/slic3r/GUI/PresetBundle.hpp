@@ -32,6 +32,8 @@ public:
     // Load selections (current print, current filaments, current printer) from config.ini
     // This is done just once on application start up.
     void            load_presets(const AppConfig &config, const std::string &preferred_model_id = "");
+    void            update_layers_to_thickness();
+
 
     // Export selections (current print, current filaments, current printer) into config.ini
     void            export_selections(AppConfig &config);

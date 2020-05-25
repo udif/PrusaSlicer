@@ -231,6 +231,7 @@ void PresetBundle::load_presets(const AppConfig &config, const std::string &pref
         errors_cummulative += err.what();
     }
     this->update_multi_material_filament_presets();
+    this->update_layers_to_thickness();
     this->update_compatible(false);
     if (! errors_cummulative.empty())
         throw std::runtime_error(errors_cummulative);
@@ -238,6 +239,25 @@ void PresetBundle::load_presets(const AppConfig &config, const std::string &pref
     this->load_selections(config, preferred_model_id);
 }
 
+//
+// convert *_solid_layers parameters to *_solid_thickness
+//
+void PresetBundle::update_layers_to_thickness()
+{
+    for (auto p: this->prints) {
+        auto opt = p.config;
+        if (opt.has("top_solid_layers") && opt.has("layer_thickness")) {
+            opt.set_key_value("top_solid_thickness",
+                new ConfigOptionFloat (opt.opt_int("top_solid_layers") * opt.opt_float("layer_thickness")));
+            opt.erase("top_solid_layers");
+        }
+        if (opt.has("bottom_solid_layers") && opt.has("layer_thickness")) {
+            opt.set_key_value("bottom_solid_thickness",
+                new ConfigOptionFloat (opt.opt_int("bottom_solid_layers") * opt.opt_float("layer_thickness")));
+            opt.erase("bottom_solid_layers");
+        }
+    }
+}
 // Load system presets into this PresetBundle.
 // For each vendor, there will be a single PresetBundle loaded.
 std::string PresetBundle::load_system_presets()
